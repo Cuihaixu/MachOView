@@ -99,10 +99,15 @@
                                 location:(uint64_t)location
                                   length:(uint64_t)length;
 
+//- (MVNode *) createDyldChainedFixupsImportsNode:parent
+//                                 caption:(NSString *)caption
+//                                location:(uint64_t)location
+//                                  length:(uint64_t)length;
 - (MVNode *) createDyldChainedFixupsImportsNode:parent
                                  caption:(NSString *)caption
                                 location:(uint64_t)location
-                                  length:(uint64_t)length;
+                                  length:(uint64_t)length
+                                  header:(struct dyld_chained_fixups_header *)header;
 
 - (MVNode *) createDyldChainedFixupsSymbolsNode:parent
                                  caption:(NSString *)caption
@@ -113,6 +118,7 @@
                                caption:(NSString *)caption
                               location:(uint64_t)location
                                 length:(uint64_t)length;
+
 
 @end
 

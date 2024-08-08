@@ -1979,7 +1979,8 @@ using namespace std;
     [self createDyldChainedFixupsImportsNode:parent
                                      caption:@"Fixups Imports"
                                     location:location + header.imports_offset
-                                      length:length];
+                                      length:length 
+                                      header:&header];
     
     [self createCStringsNode:parent
                      caption:@"Fixups Symbols"
@@ -2040,7 +2041,6 @@ using namespace std;
 }
 
 /**
- 
  struct dyld_chained_starts_in_segment
  {
      uint32_t    size;               // size of this (amount kernel needs to copy)
@@ -2119,21 +2119,135 @@ using namespace std;
     return node;
 }
 
-- (MVNode *) createDyldChainedFixupsImportsNode:parent
+union dyld_chained_import_union
+{
+    uint32_t value;
+    struct dyld_chained_import info;
+};
+
+union dyld_chained_import_addend_union
+{
+    struct
+    {
+        uint32_t chainedImport;
+        int32_t addend;
+    } raw;
+    struct dyld_chained_import_addend info;
+};
+
+union dyld_chained_import_addend64_union
+{
+    struct
+    {
+        uint64_t chainedImport64;
+        uint64_t addend;
+    } raw;
+    struct dyld_chained_import_addend64 info;
+};
+
+- (MVNode *) createDyldChainedFixupsImportsNode:(MVNode *)parent
                                  caption:(NSString *)caption
                                 location:(uint64_t)location
                                   length:(uint64_t)length
+                                  header:(struct dyld_chained_fixups_header *)header
 {
     
     NSRange range = NSMakeRange(location,0);
     NSString * lastReadHex;
     MVNodeSaver nodeSaver;
     MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
-    // header
-    struct dyld_chained_import inport_info;
-    {
-
+    switch (header->imports_format) {
+        case DYLD_CHAINED_IMPORT:
+        {
+            union  dyld_chained_import_union importValue;
+            for (uint32_t i = 0; i < header->imports_count; i++) {
+                importValue.value = [dataController read_uint32:range lastReadHex:&lastReadHex];
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                         :lastReadHex
+                                         :@"Chained Import"
+                                         :nil];
+                [node.details appendRow:nil
+                                         :nil
+                                         :@"lib_ordinal"
+                                         :[NSString stringWithFormat:@"%d", importValue.info.lib_ordinal]];
+                [node.details appendRow:nil
+                                         :nil
+                                         :@"weak_import"
+                                         :[NSString stringWithFormat:@"%d", importValue.info.weak_import]];
+                [node.details appendRow:nil
+                                         :nil
+                                         :@"name_offset"
+                                         :[NSString stringWithFormat:@"%d", importValue.info.name_offset]];
+            }
+        }
+            break;
+        case DYLD_CHAINED_IMPORT_ADDEND:
+        {
+            union dyld_chained_import_addend_union chainedImportAddend;
+            for (uint32_t i = 0; i < header->imports_count; i++) {
+                chainedImportAddend.raw.chainedImport = [dataController read_uint32:range lastReadHex:&lastReadHex];
+                chainedImportAddend.raw.addend = [dataController read_int32:range lastReadHex:&lastReadHex];
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                         :lastReadHex
+                                         :@"Chained Import"
+                                         :nil];
+                [node.details appendRow:nil
+                                         :nil
+                                         :@"lib_ordinal"
+                                         :[NSString stringWithFormat:@"%d", chainedImportAddend.info.lib_ordinal]];
+                [node.details appendRow:nil
+                                         :nil
+                                         :@"weak_import"
+                                         :[NSString stringWithFormat:@"%d", chainedImportAddend.info.weak_import]];
+                [node.details appendRow:nil
+                                         :nil
+                                         :@"name_offset"
+                                         :[NSString stringWithFormat:@"%d", chainedImportAddend.info.name_offset]];
+                [node.details appendRow:nil
+                                         :nil
+                                         :@"addend"
+                                         :[NSString stringWithFormat:@"%d", chainedImportAddend.info.addend]];
+                
+            }
+        }
+            break;
+        case DYLD_CHAINED_IMPORT_ADDEND64:
+        {
+            union dyld_chained_import_addend64_union chainedImportAddend64;
+            chainedImportAddend64.raw.chainedImport64 = [dataController read_uint64:range lastReadHex:&lastReadHex];
+            chainedImportAddend64.raw.addend = [dataController read_uint64:range lastReadHex:&lastReadHex];
+            [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                     :lastReadHex
+                                     :@"Chained Import"
+                                     :nil];
+            [node.details appendRow:nil
+                                     :nil
+                                     :@"lib_ordinal"
+                                     :[NSString stringWithFormat:@"%d", chainedImportAddend64.info.lib_ordinal]];
+            [node.details appendRow:nil
+                                     :nil
+                                     :@"weak_import"
+                                     :[NSString stringWithFormat:@"%d", chainedImportAddend64.info.weak_import]];
+            [node.details appendRow:nil
+                                     :nil
+                                     :@"reserved"
+                                     :[NSString stringWithFormat:@"%d", chainedImportAddend64.info.reserved]];
+            [node.details appendRow:nil
+                                     :nil
+                                     :@"name_offset"
+                                     :[NSString stringWithFormat:@"%d", chainedImportAddend64.info.name_offset]];
+            [node.details appendRow:nil
+                                     :nil
+                                     :@"addend"
+                                     :[NSString stringWithFormat:@"%lld", chainedImportAddend64.info.addend]];
+        }
+            break;
+            
+        default:
+            break;
     }
+
+    
     
     return node;
 }
