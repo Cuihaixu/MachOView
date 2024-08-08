@@ -106,7 +106,12 @@ using namespace std;
 
   while (NSMaxRange(range) < location + length)
   {
+
     NSString * symbolName = [dataController read_string:range lastReadHex:&lastReadHex];
+    [node.details appendRow:[NSString stringWithFormat:@"#%ld", range.location - (NSUInteger)location]
+                           :nil
+                           :nil
+                           :nil];
     
     [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                            :lastReadHex

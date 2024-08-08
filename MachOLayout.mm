@@ -353,10 +353,14 @@ long hexdec(const char *hex) {
                              location:symtab_command->symoff + imageOffset
                                length:symtab_command->nsyms * sizeof(struct nlist)];
     
-    [self createDataNode:rootNode 
-                 caption:@"String Table"
-                location:symtab_command->stroff + imageOffset
-                  length:symtab_command->strsize];
+    MVNode *stringTableNode = [self createDataNode:rootNode
+                                           caption:@"String Table"
+                                          location:symtab_command->stroff + imageOffset
+                                            length:symtab_command->strsize];
+    [self createCStringsNode:stringTableNode
+                     caption:@"String Parse"
+                    location:symtab_command->stroff + imageOffset
+                      length:symtab_command->strsize];
   }
   
   if (dysymtab_command)
@@ -424,6 +428,8 @@ long hexdec(const char *hex) {
                 location:code_signature->dataoff + imageOffset
                   length:code_signature->datasize];
   }
+    
+    
   
   if (function_starts)
   {
@@ -440,6 +446,7 @@ long hexdec(const char *hex) {
                                         location:data_in_code_entries->dataoff + imageOffset
                                           length:data_in_code_entries->datasize];
   }
+    
   
   //============ Symbol Table ====================
   //==============================================
@@ -608,6 +615,9 @@ long hexdec(const char *hex) {
   struct linkedit_data_command const * code_signature = NULL;
   struct linkedit_data_command const * function_starts = NULL;
   struct linkedit_data_command const * data_in_code_entries = NULL;
+  struct linkedit_data_command const * dyld_chained_fixups = NULL;
+  struct linkedit_data_command const *dyld_exports_trie = NULL;
+    // LC_DYLD_EXPORTS_TRIE
   
   MATCH_STRUCT(mach_header_64,imageOffset);
   
@@ -620,7 +630,7 @@ long hexdec(const char *hex) {
     struct load_command const * load_command = *cmdIter;
     switch (load_command->cmd)
     {
-      case LC_SEGMENT_64:     
+      case LC_SEGMENT_64:
       {
         struct segment_command_64 const * segment_command_64 = (struct segment_command_64 const *)load_command;
         
@@ -648,6 +658,8 @@ long hexdec(const char *hex) {
       case LC_CODE_SIGNATURE: code_signature = (struct linkedit_data_command const *)load_command; break;
       case LC_FUNCTION_STARTS: function_starts = (struct linkedit_data_command const *)load_command; break;
       case LC_DATA_IN_CODE: data_in_code_entries = (struct linkedit_data_command const *)load_command; break;
+      case LC_DYLD_CHAINED_FIXUPS: dyld_chained_fixups = (struct linkedit_data_command const *)load_command; break;
+      case LC_DYLD_EXPORTS_TRIE: dyld_exports_trie = (struct linkedit_data_command const *)load_command; break;
       default: ; // not interested
     }
   }
@@ -658,6 +670,8 @@ long hexdec(const char *hex) {
   MVNode * segmentSplitInfoNode = nil;
   MVNode * functionStartsNode = nil;
   MVNode * dataInCodeEntriesNode = nil;
+  MVNode * dyldChainedFixupsNode = nil;
+  MVNode * dyldExportsTrieNode = nil;
 
   NSString * lastNodeCaption;
   
@@ -668,10 +682,14 @@ long hexdec(const char *hex) {
                              location:symtab_command->symoff + imageOffset
                                length:symtab_command->nsyms * sizeof(struct nlist_64)];
     
-    [self createDataNode:rootNode 
-                 caption:@"String Table"
-                location:symtab_command->stroff + imageOffset
-                  length:symtab_command->strsize];
+    MVNode *stringTableNode = [self createDataNode:rootNode
+                                           caption:@"String Table"
+                                          location:symtab_command->stroff + imageOffset
+                                            length:symtab_command->strsize];
+    [self createCStringsNode:stringTableNode
+                     caption:@"String Parse"
+                    location:symtab_command->stroff + imageOffset
+                      length:symtab_command->strsize];
   }
   
   if (dysymtab_command)
@@ -718,7 +736,7 @@ long hexdec(const char *hex) {
   
   if (twolevel_hints_command)
   {
-    twoLevelHintsNode = [self createDataNode:rootNode 
+    twoLevelHintsNode = [self createDataNode:rootNode
                                      caption:@"Two Level Hints Table"
                                     location:twolevel_hints_command->offset + imageOffset
                                       length:twolevel_hints_command->nhints * sizeof(struct twolevel_hint)];
@@ -726,7 +744,7 @@ long hexdec(const char *hex) {
   
   if (segment_split_info)
   {
-    segmentSplitInfoNode = [self createDataNode:rootNode 
+    segmentSplitInfoNode = [self createDataNode:rootNode
                                         caption:@"Segment Split Info"
                                        location:segment_split_info->dataoff + imageOffset
                                          length:segment_split_info->datasize];
@@ -734,7 +752,7 @@ long hexdec(const char *hex) {
 
   if (code_signature)
   {
-    [self createDataNode:rootNode 
+    [self createDataNode:rootNode
                  caption:@"Code Signature"
                 location:code_signature->dataoff + imageOffset
                   length:code_signature->datasize];
@@ -742,10 +760,26 @@ long hexdec(const char *hex) {
 
   if (function_starts)
   {
-    functionStartsNode = [self createDataNode:rootNode 
+    functionStartsNode = [self createDataNode:rootNode
                                       caption:@"Function Starts"
                                      location:function_starts->dataoff + imageOffset
                                        length:function_starts->datasize];
+  }
+    
+  if (dyld_chained_fixups)
+  {
+        dyldChainedFixupsNode  = [self createDataNode:rootNode
+                                          caption:@"Chained Fixups"
+                                         location:dyld_chained_fixups->dataoff + imageOffset
+                                           length:dyld_chained_fixups->datasize];
+  }
+    
+  if (dyld_exports_trie)
+  {
+        dyldExportsTrieNode  = [self createDataNode:rootNode
+                                          caption:@"Exports Trie"
+                                         location:dyld_exports_trie->dataoff + imageOffset
+                                           length:dyld_exports_trie->datasize];
   }
 
   if (data_in_code_entries)
@@ -784,19 +818,19 @@ long hexdec(const char *hex) {
       //==============================================
       if (dysymtab_command->modtaboff * dysymtab_command->nmodtab > 0)
       {
-        [self createModules64Node:dysymtabNode 
+        [self createModules64Node:dysymtabNode
                           caption:(lastNodeCaption = @"Modules64")
                          location:dysymtab_command->modtaboff + imageOffset
                            length:dysymtab_command->nmodtab * sizeof(struct dylib_module_64)];
-      }  
+      }
 
       //========== Table of Contents =================
       //==============================================
       if (dysymtab_command->tocoff * dysymtab_command->ntoc > 0)
       {
-        [self createTOC64Node:dysymtabNode 
+        [self createTOC64Node:dysymtabNode
                       caption:(lastNodeCaption = @"Table of Contents")
-                     location:dysymtab_command->tocoff + imageOffset 
+                     location:dysymtab_command->tocoff + imageOffset
                        length:dysymtab_command->ntoc * sizeof(struct dylib_table_of_contents)];
       }
 
@@ -804,7 +838,7 @@ long hexdec(const char *hex) {
       //==============================================
       if (dysymtab_command->extrefsymoff * dysymtab_command->nextrefsyms > 0)
       {
-        [self createReferencesNode:dysymtabNode 
+        [self createReferencesNode:dysymtabNode
                            caption:(lastNodeCaption = @"External References")
                           location:dysymtab_command->extrefsymoff + imageOffset
                             length:dysymtab_command->nextrefsyms * sizeof(struct dylib_reference)];
@@ -824,7 +858,7 @@ long hexdec(const char *hex) {
       //==============================================
       if (dysymtab_command->extreloff * dysymtab_command->nextrel > 0)
       {
-        [self createReloc64Node:dysymtabNode 
+        [self createReloc64Node:dysymtabNode
                         caption:(lastNodeCaption = @"External Relocations")
                        location:dysymtab_command->extreloff + imageOffset
                          length:dysymtab_command->nextrel * sizeof(struct relocation_info)
@@ -835,7 +869,7 @@ long hexdec(const char *hex) {
       //==============================================
       if (dysymtab_command->locreloff * dysymtab_command->nlocrel > 0)
       {
-        [self createReloc64Node:dysymtabNode 
+        [self createReloc64Node:dysymtabNode
                         caption:(lastNodeCaption = @"Local Reloc Table")
                        location:dysymtab_command->locreloff + imageOffset
                          length:dysymtab_command->nlocrel * sizeof(struct relocation_info)
@@ -852,8 +886,8 @@ long hexdec(const char *hex) {
   {
     @try
     {
-      [self createTwoLevelHintsNode:twoLevelHintsNode 
-                            caption:(lastNodeCaption = @"Hints") 
+      [self createTwoLevelHintsNode:twoLevelHintsNode
+                            caption:(lastNodeCaption = @"Hints")
                            location:twoLevelHintsNode.dataRange.location
                              length:twoLevelHintsNode.dataRange.length
                               index:dysymtab_command->iundefsym];
@@ -868,8 +902,8 @@ long hexdec(const char *hex) {
   {
     @try
     {
-      [self createSplitSegmentNode:segmentSplitInfoNode 
-                           caption:(lastNodeCaption = @"Shared Region Info") 
+      [self createSplitSegmentNode:segmentSplitInfoNode
+                           caption:(lastNodeCaption = @"Shared Region Info")
                           location:segmentSplitInfoNode.dataRange.location
                             length:segmentSplitInfoNode.dataRange.length
                        baseAddress:base_addr];
@@ -878,15 +912,15 @@ long hexdec(const char *hex) {
     {
       [self printException:exception caption:lastNodeCaption];
     }
-  }  
+  }
   
   if (functionStartsNode && functionStartsNode.dataRange.length > 0)
   {
     @try
     {
-      [self createFunctionStartsNode:functionStartsNode 
-                             caption:(lastNodeCaption = @"Functions")  
-                            location:functionStartsNode.dataRange.location 
+      [self createFunctionStartsNode:functionStartsNode
+                             caption:(lastNodeCaption = @"Functions")
+                            location:functionStartsNode.dataRange.location
                               length:functionStartsNode.dataRange.length
                          baseAddress:base_addr];
     }
@@ -910,6 +944,32 @@ long hexdec(const char *hex) {
       [self printException:exception caption:lastNodeCaption];
     }
   }
+    
+    if (dyldChainedFixupsNode && dyldChainedFixupsNode.dataRange.length > 0)
+    {
+        @try
+        {
+            [self createDyldChainedFixupsNode:dyldChainedFixupsNode
+                                      caption:@"Fixups Header"
+                                     location:dyldChainedFixupsNode.dataRange.location
+                                       length:dyldChainedFixupsNode.dataRange.length];
+        } @catch (NSException *exception)
+        {
+            [self printException:exception caption:lastNodeCaption];
+        }
+    }
+    
+    if (dyldExportsTrieNode && dyldExportsTrieNode.dataRange.length > 0)
+    {
+        @try {
+            [self createDyldExportsTrieNode:dyldExportsTrieNode
+                                    caption:@"Exports Trie"
+                                   location:dyldExportsTrieNode.dataRange.location
+                                     length:dyldExportsTrieNode.dataRange.length];
+        } @catch (NSException *exception) {
+            [self printException:exception caption:lastNodeCaption];
+        }
+    }
 }
 
 //-----------------------------------------------------------------------------

@@ -15,12 +15,14 @@
 #import "LinkEdit.h"
 #import "ReadWrite.h"
 #import "DataController.h"
+#import "SectionContents.h"
 #import <mach-o/loader.h>
 #import <mach-o/reloc.h>
 #import <mach-o/arm/reloc.h>
 #import <mach-o/arm64/reloc.h>
 #import <mach-o/x86_64/reloc.h>
 #import <mach-o/nlist.h>
+#import <mach-o/fixup-chains.h>
 
 using namespace std;
 
@@ -1859,6 +1861,294 @@ using namespace std;
   }
   
   return node;
+}
+
+- (MVNode *) createDyldChainedFixupsNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length
+{
+    /**
+     struct dyld_chained_fixups_header
+     {
+         uint32_t    fixups_version;    // 0
+         uint32_t    starts_offset;     // offset of dyld_chained_starts_in_image in chain_data
+         uint32_t    imports_offset;    // offset of imports table in chain_data
+         uint32_t    symbols_offset;    // offset of symbol strings in chain_data
+         uint32_t    imports_count;     // number of imported symbol names
+         uint32_t    imports_format;    // DYLD_CHAINED_IMPORT*
+         uint32_t    symbols_format;    // 0 => uncompressed, 1 => zlib compressed
+     }; */
+    struct dyld_chained_fixups_header header;
+    NSRange range = NSMakeRange(location, 0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
+    {
+        header.fixups_version = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Fixups Version"
+                               :[NSString stringWithFormat:@"%d", header.fixups_version]];
+    }
+    {
+        header.starts_offset = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Starts Offset"
+                               :[NSString stringWithFormat:@"%d", header.starts_offset]];
+    }
+    {
+        header.imports_offset = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Offset"
+                               :[NSString stringWithFormat:@"%d", header.imports_offset]];
+    }
+    {
+        header.symbols_offset = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Symbols Offset"
+                               :[NSString stringWithFormat:@"%d", header.symbols_offset]];
+    }
+    {
+        header.imports_count = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Count"
+                               :[NSString stringWithFormat:@"%d", header.imports_count]];
+    }
+    
+    {
+        /* values for dyld_chained_fixups_header.imports_format
+        enum {
+            DYLD_CHAINED_IMPORT          = 1,
+            DYLD_CHAINED_IMPORT_ADDEND   = 2,
+            DYLD_CHAINED_IMPORT_ADDEND64 = 3,
+        }; */
+        header.imports_format = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        NSString *valueInfo = nil;
+        if (header.imports_format == 1)
+        {
+            valueInfo = @"DYLD_CHAINED_IMPORT";
+        }
+        else if (header.imports_format == 2)
+        {
+            valueInfo = @"DYLD_CHAINED_IMPORT_ADDEND";
+        }
+        else if (header.imports_format == 3)
+        {
+            valueInfo = @"DYLD_CHAINED_IMPORT_ADDEND64";
+        }
+        else
+        {
+            valueInfo = [NSString stringWithFormat:@"Unknown format (%d)", header.imports_format];
+        }
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Format"
+                               :valueInfo];
+    }
+    {
+        header.symbols_format = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        NSString *valueInfo = nil;
+        if (header.symbols_format == 0)
+        {
+            valueInfo = @"Uncompressed";
+        }
+        else if (header.symbols_format == 1)
+        {
+            valueInfo = @"zlib Compressed";
+        }
+        else
+        {
+            valueInfo = [NSString stringWithFormat:@"Unknown format (%d)", header.symbols_format];
+        }
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Symbols Format"
+                               :valueInfo];
+    }
+    
+    [self createDyldChainedFixupsStartsNode:parent
+                                    caption:@"Fixups Segment Starts"
+                                   location:location + header.starts_offset
+                                     length:length];
+    
+    [self createDyldChainedFixupsImportsNode:parent
+                                     caption:@"Fixups Imports"
+                                    location:location + header.imports_offset
+                                      length:length];
+    
+    [self createCStringsNode:parent
+                     caption:@"Fixups Symbols"
+                    location:location + header.symbols_offset
+                      length:length - header.symbols_offset];
+    
+    return node;
+}
+
+- (MVNode *) createDyldChainedFixupsStartsNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length
+{
+    struct dyld_chained_starts_in_image starts;
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
+    {
+        starts.seg_count = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Segment Count"
+                               :[NSString stringWithFormat:@"%d", starts.seg_count]];
+        
+        std::vector<uint32> seg_info_offset;
+        for (uint32 i = 0; i < starts.seg_count; i++)
+        {
+            uint32 offset = [dataController read_uint32:range lastReadHex:&lastReadHex];
+            seg_info_offset.push_back(offset);
+            NSString *valueInfo = nil;
+            if (offset == 0) {
+                valueInfo = @"No Fixups";
+            } else {
+                valueInfo = [NSString stringWithFormat:@"%d", offset];
+            }
+            [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                   :lastReadHex
+                                   :[NSString stringWithFormat:@"Segment Offset #%d", i+1]
+                                   :valueInfo];
+        }
+        for (uint32 i = 0; i < seg_info_offset.size(); i++) {
+            uint32 offset = seg_info_offset[i];
+            NSString *caption = [NSString stringWithFormat:@"Segment Chained Fixups (%s)", segments_64[i]->segname];
+            
+            [self createDyldChainedStartsInSegmentNode:node
+                                               caption:caption
+                                              location:location + offset
+                                                length:length
+                                            needFixups:offset != 0];
+        }
+        
+        // DYLD_CHAINED_PTR_START_NONE
+        
+    }
+    return node;
+}
+
+/**
+ 
+ struct dyld_chained_starts_in_segment
+ {
+     uint32_t    size;               // size of this (amount kernel needs to copy)
+     uint16_t    page_size;          // 0x1000 or 0x4000
+     uint16_t    pointer_format;     // DYLD_CHAINED_PTR_*
+     uint64_t    segment_offset;     // offset in memory to start of segment
+     uint32_t    max_valid_pointer;  // for 32-bit OS, any value beyond this is not a pointer
+     uint16_t    page_count;         // how many pages are in array
+     uint16_t    page_start[1];      // each entry is offset in each page of first element in chain
+                                     // or DYLD_CHAINED_PTR_START_NONE if no fixups on page
+  // uint16_t    chain_starts[1];    // some 32-bit formats may require multiple starts per page.
+                                     // for those, if high bit is set in page_starts[], then it
+                                     // is index into chain_starts[] which is a list of starts
+                                     // the last of which has the high bit set
+ };
+ */
+
+- (MVNode *) createDyldChainedStartsInSegmentNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length
+                                  needFixups:(bool)needFixups
+{
+    struct dyld_chained_starts_in_segment startsInSegment;
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
+    if (!needFixups) {
+        return node;
+    }
+    
+    {
+        startsInSegment.size = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"size"
+                               :[NSString stringWithFormat:@"%d", startsInSegment.size]];
+    }
+    {
+        startsInSegment.page_size = [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"page_size"
+                               :[NSString stringWithFormat:@"%d", startsInSegment.page_size]];
+    }
+    {
+        startsInSegment.pointer_format = [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"pointer_format"
+                               :[NSString stringWithFormat:@"%d", startsInSegment.pointer_format]];
+    }
+    {
+        startsInSegment.segment_offset = [dataController read_uint64:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"segment_offset"
+                               :[NSString stringWithFormat:@"%lld", startsInSegment.segment_offset]];
+    }
+    {
+        startsInSegment.max_valid_pointer = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"max_valid_pointer"
+                               :[NSString stringWithFormat:@"%d", startsInSegment.max_valid_pointer]];
+    }
+    {
+        startsInSegment.page_count = [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"page_count"
+                               :[NSString stringWithFormat:@"%d", startsInSegment.page_count]];
+    }
+    
+    return node;
+}
+
+- (MVNode *) createDyldChainedFixupsImportsNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length
+{
+    
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
+    // header
+    struct dyld_chained_import inport_info;
+    {
+
+    }
+    
+    return node;
+}
+
+- (MVNode *) createDyldExportsTrieNode:parent
+                               caption:(NSString *)caption
+                              location:(uint64_t)location
+                                length:(uint64_t)length
+{
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
+    
+    return node;
 }
 
 @end

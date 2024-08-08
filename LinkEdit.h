@@ -89,6 +89,30 @@
                                 location:(uint64_t)location
                                   length:(uint64_t)length;
 
+- (MVNode *) createDyldChainedFixupsNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length;
+
+- (MVNode *) createDyldChainedFixupsStartsNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length;
+
+- (MVNode *) createDyldChainedFixupsImportsNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length;
+
+- (MVNode *) createDyldChainedFixupsSymbolsNode:parent
+                                 caption:(NSString *)caption
+                                location:(uint64_t)location
+                                  length:(uint64_t)length;
+
+- (MVNode *) createDyldExportsTrieNode:parent
+                               caption:(NSString *)caption
+                              location:(uint64_t)location
+                                length:(uint64_t)length;
 
 @end
 
