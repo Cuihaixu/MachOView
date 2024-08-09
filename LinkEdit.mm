@@ -2031,6 +2031,7 @@ using namespace std;
                                                caption:caption
                                               location:location + offset
                                                 length:length
+                                               semgent:i
                                             needFixups:offset != 0];
         }
         
@@ -2058,11 +2059,122 @@ using namespace std;
  };
  */
 
+/**
+ 
+ enum {
+     DYLD_CHAINED_PTR_ARM64E                 =  1,    // stride 8, unauth target is vmaddr
+     DYLD_CHAINED_PTR_64                     =  2,    // target is vmaddr
+     DYLD_CHAINED_PTR_32                     =  3,
+ 
+     DYLD_CHAINED_PTR_32_CACHE               =  4,
+     DYLD_CHAINED_PTR_32_FIRMWARE            =  5,
+     DYLD_CHAINED_PTR_64_OFFSET              =  6,    // target is vm offset
+     DYLD_CHAINED_PTR_ARM64E_OFFSET          =  7,    // old name
+     DYLD_CHAINED_PTR_ARM64E_KERNEL          =  7,    // stride 4, unauth target is vm offset
+     DYLD_CHAINED_PTR_64_KERNEL_CACHE        =  8,
+     DYLD_CHAINED_PTR_ARM64E_USERLAND        =  9,    // stride 8, unauth target is vm offset
+     DYLD_CHAINED_PTR_ARM64E_FIRMWARE        = 10,    // stride 4, unauth target is vmaddr
+     DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE    = 11,    // stride 1, x86_64 kernel caches
+     DYLD_CHAINED_PTR_ARM64E_USERLAND24      = 12,    // stride 8, unauth target is vm offset, 24-bit bind
+ };
+ */
+
+- (NSString *)chainedPointerFormatName:(uint16_t)format
+{
+    switch (format) {
+        case DYLD_CHAINED_PTR_ARM64E: return @"DYLD_CHAINED_PTR_ARM64E";
+        case DYLD_CHAINED_PTR_64: return @"DYLD_CHAINED_PTR_64";
+        case DYLD_CHAINED_PTR_32: return @"DYLD_CHAINED_PTR_32";
+        case DYLD_CHAINED_PTR_32_CACHE: return @"DYLD_CHAINED_PTR_32_CACHE";
+        case DYLD_CHAINED_PTR_32_FIRMWARE: return @"DYLD_CHAINED_PTR_32_FIRMWARE";
+        case DYLD_CHAINED_PTR_64_OFFSET: return @"DYLD_CHAINED_PTR_64_OFFSET";
+        case DYLD_CHAINED_PTR_ARM64E_OFFSET /* DYLD_CHAINED_PTR_ARM64E_KERNEL */: return @"DYLD_CHAINED_PTR_ARM64E_OFFSET / DYLD_CHAINED_PTR_ARM64E_KERNEL";
+        case DYLD_CHAINED_PTR_64_KERNEL_CACHE: return @"DYLD_CHAINED_PTR_64_KERNEL_CACHE";
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND: return @"DYLD_CHAINED_PTR_ARM64E_USERLAND";
+        case DYLD_CHAINED_PTR_ARM64E_FIRMWARE: return @"DYLD_CHAINED_PTR_ARM64E_FIRMWARE";
+        case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE: return @"DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE";
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND24: return @"DYLD_CHAINED_PTR_ARM64E_USERLAND24";
+        default: return [NSString stringWithFormat:@"Unknown pointer format (%d)", format];
+    }
+}
+
+#define DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE 13
+
+- (unsigned)chainedPointerFormatStrideSize:(uint16_t)format {
+    switch (format) {
+        case DYLD_CHAINED_PTR_ARM64E:
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+        case DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE:
+            return 8;
+        case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+        case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+        case DYLD_CHAINED_PTR_32_FIRMWARE:
+        case DYLD_CHAINED_PTR_64:
+        case DYLD_CHAINED_PTR_64_OFFSET:
+        case DYLD_CHAINED_PTR_32:
+        case DYLD_CHAINED_PTR_32_CACHE:
+        case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+            return 4;
+        case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+            return 1;
+    }
+    return 0;
+}
+
+union ChainedFixupPointerOnDisk
+{
+    union Arm64e {
+        dyld_chained_ptr_arm64e_auth_rebase authRebase;
+        dyld_chained_ptr_arm64e_auth_bind   authBind;
+        dyld_chained_ptr_arm64e_rebase      rebase;
+        dyld_chained_ptr_arm64e_bind        bind;
+        dyld_chained_ptr_arm64e_bind24      bind24;
+        dyld_chained_ptr_arm64e_auth_bind24 authBind24;
+    };
+
+    union Generic64 {
+        dyld_chained_ptr_64_rebase rebase;
+        dyld_chained_ptr_64_bind   bind;
+    };
+
+    union Generic32 {
+        dyld_chained_ptr_32_rebase rebase;
+        dyld_chained_ptr_32_bind   bind;
+    };
+
+    struct Kernel64 : dyld_chained_ptr_64_kernel_cache_rebase {
+        const char* keyName() const;
+    };
+
+    struct Firm32 : dyld_chained_ptr_32_firmware_rebase { };
+
+    union Cache64e {
+//        dyld_chained_ptr_arm64e_shared_cache_rebase      regular;
+//        dyld_chained_ptr_arm64e_shared_cache_auth_rebase auth;
+        uint64_t test;
+    };
+
+    typedef dyld_chained_ptr_32_cache_rebase Cache32;
+
+    uint64_t            raw64;
+    Arm64e              arm64e;
+    Generic64           generic64;
+    Kernel64            kernel64;
+    Cache64e            cache64e;
+
+    uint32_t            raw32;
+    Generic32           generic32;
+    Cache32             cache32;
+    Firm32              firmware32;
+};
+
 - (MVNode *) createDyldChainedStartsInSegmentNode:parent
                                  caption:(NSString *)caption
                                 location:(uint64_t)location
                                   length:(uint64_t)length
-                                  needFixups:(bool)needFixups
+                                 semgent:(uint32_t)segment
+                              needFixups:(bool)needFixups
 {
     struct dyld_chained_starts_in_segment startsInSegment;
     NSRange range = NSMakeRange(location,0);
@@ -2089,10 +2201,11 @@ using namespace std;
     }
     {
         startsInSegment.pointer_format = [dataController read_uint16:range lastReadHex:&lastReadHex];
+        NSString *valueInfo = [NSString stringWithFormat:@"%@", [self chainedPointerFormatName:startsInSegment.pointer_format]];
         [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                :lastReadHex
                                :@"pointer_format"
-                               :[NSString stringWithFormat:@"%d", startsInSegment.pointer_format]];
+                               :valueInfo];
     }
     {
         startsInSegment.segment_offset = [dataController read_uint64:range lastReadHex:&lastReadHex];
@@ -2114,8 +2227,118 @@ using namespace std;
                                :lastReadHex
                                :@"page_count"
                                :[NSString stringWithFormat:@"%d", startsInSegment.page_count]];
+        
+        for (int pageIndex = 0; pageIndex < startsInSegment.page_count; pageIndex++) {
+            uint16_t offsetInPage = [dataController read_uint16:range lastReadHex:&lastReadHex];
+            NSString *valueInfo = @"";
+            if (offsetInPage == DYLD_CHAINED_PTR_START_NONE) {
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                       :lastReadHex
+                                       :@"Offset In Page"
+                                       :@"DYLD_CHAINED_PTR_START_NONE"];
+                continue;
+            }
+            if (offsetInPage & DYLD_CHAINED_PTR_START_MULTI) {
+//                bool chainEnd = false;
+//                uint32_t overflowIndex = offsetInPage & ~DYLD_CHAINED_PTR_START_MULTI;
+//                while (!chainEnd) {
+//
+//                }
+            } else {
+                uint64_t pageContentStart = startsInSegment.segment_offset + (pageIndex * startsInSegment.page_size);
+                uint64_t chainAddress = (pageContentStart + offsetInPage);
+                const unsigned stride = [self chainedPointerFormatStrideSize:startsInSegment.pointer_format];
+                assert(stride != 0);
+                bool  stop = false;
+                bool  chainEnd = false;
+                union ChainedFixupPointerOnDisk chainContent;
+                switch (stride) {
+                    case 8:
+                    {
+                        chainContent.raw64 = [dataController read_uint64:range lastReadHex:&lastReadHex];
+                    }
+                        break;
+                    case 4:
+                    {
+                        chainContent.raw64 = [dataController read_uint32:range lastReadHex:&lastReadHex];
+                    }
+                        break;
+                    case 1:
+                    {
+                        
+                    }
+                        break;
+                    default:
+                        assert(false);
+                        break;
+                }
+                while (!stop && !chainEnd) {
+                    switch (startsInSegment.pointer_format) {
+                        case DYLD_CHAINED_PTR_ARM64E:
+                        case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+                        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+                        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+                        case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+                        case DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE:
+                        {
+                            if (chainContent.arm64e.rebase.next == 0) {
+                                chainEnd = true;
+                                
+                            } else {
+                                chainContent.raw64 = [dataController read_uint64:range lastReadHex:&lastReadHex];
+                            }
+                        }
+                            break;
+                        case DYLD_CHAINED_PTR_64:
+                        case DYLD_CHAINED_PTR_64_OFFSET:
+                        {
+                            if (chainContent.generic64.rebase.next == 0) {
+                                
+                            } else {
+                                chainContent.raw64 = [dataController read_uint64:range lastReadHex:&lastReadHex];
+                            }
+                        }
+//                            if ( chainContent.generic64.rebase.next == 0 )
+//                                chainEnd = true;
+//                            else
+//                                chain = (ChainedFixupPointerOnDisk*)((uint8_t*)chain + chainContent.generic64.rebase.next*4);
+                            break;
+                        case DYLD_CHAINED_PTR_32:
+//                            if ( chainContent.generic32.rebase.next == 0 )
+//                                chainEnd = true;
+//                            else {
+//                                chain = (ChainedFixupPointerOnDisk*)((uint8_t*)chain + chainContent.generic32.rebase.next*4);
+//                                if ( !notifyNonPointers ) {
+//                                    while ( (chain->generic32.rebase.bind == 0) && (chain->generic32.rebase.target > max_valid_pointer) ) {
+//                                        // not a real pointer, but a non-pointer co-opted into chain
+//                                        chain = (ChainedFixupPointerOnDisk*)((uint8_t*)chain + chain->generic32.rebase.next*4);
+//                                    }
+//                                }
+//                            }
+                            break;
+                        case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+                        case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+//                            if ( chainContent.kernel64.next == 0 )
+//                                chainEnd = true;
+//                            else
+//                                chain = (ChainedFixupPointerOnDisk*)((uint8_t*)chain + chainContent.kernel64.next*stride);
+                            break;
+                        case DYLD_CHAINED_PTR_32_FIRMWARE:
+//                            if ( chainContent.firmware32.next == 0 )
+//                                chainEnd = true;
+//                            else
+//                                chain = (ChainedFixupPointerOnDisk*)((uint8_t*)chain + chainContent.firmware32.next*4);
+                            break;
+                        default:
+                            assert(false);
+                            break;
+                    }
+                    
+                    
+                }
+            }
+        }
     }
-    
     return node;
 }
 
@@ -2261,8 +2484,98 @@ union dyld_chained_import_addend64_union
     NSString * lastReadHex;
     MVNodeSaver nodeSaver;
     MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
-    
+    return node;
+}
+
+- (MVNode *) createDyldChainedFixupsHeaderNode:(MVNode *)parent
+                                       caption:(NSString *)caption
+                                      location:(uint64_t)location
+                                        length:(uint64_t)length {
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    struct dyld_chained_fixups_header fixupsHeader;
+    MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
+    {
+        fixupsHeader.fixups_version = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Fixups Version"
+                               :[NSString stringWithFormat:@"%d", fixupsHeader.fixups_version]];
+    }
+    {
+        fixupsHeader.starts_offset = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Starts Offset"
+                               :[NSString stringWithFormat:@"%d", fixupsHeader.starts_offset]];
+    }
+    {
+        fixupsHeader.imports_offset = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Offset"
+                               :[NSString stringWithFormat:@"%d", fixupsHeader.imports_offset]];
+    }
+    {
+        fixupsHeader.symbols_offset = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Symbols Offset"
+                               :[NSString stringWithFormat:@"%d", fixupsHeader.symbols_offset]];
+    }
+    {
+        fixupsHeader.imports_count = [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Count"
+                               :[NSString stringWithFormat:@"%d", fixupsHeader.imports_count]];
+    }
     return node;
 }
 
 @end
+/* Chained Fixups Layout
+    struct dyld_chained_fixups_header
+    {
+        uint32_t    fixups_version;    // 0
+        uint32_t    starts_offset;     // offset of dyld_chained_starts_in_image in chain_data
+        uint32_t    imports_offset;    // offset of imports table in chain_data
+        uint32_t    symbols_offset;    // offset of symbol strings in chain_data
+        uint32_t    imports_count;     // number of imported symbol names
+        uint32_t    imports_format;    // DYLD_CHAINED_IMPORT*
+        uint32_t    symbols_format;    // 0 => uncompressed, 1 => zlib compressed
+        // align8 对齐
+    }; -> 32
+    
+    struct dyld_chained_starts_in_image
+    {
+        uint32_t    seg_count;
+        uint32_t    seg_info_offset[1];  // each entry is offset into this struct for that segment
+        // followed by pool of dyld_chain_starts_in_segment data
+    }; -> seg_count * uint32_t
+ 
+    struct dyld_chained_starts_in_segment
+    {
+        uint32_t    size;               // size of this (amount kernel needs to copy)
+        uint16_t    page_size;          // 0x1000 or 0x4000
+        uint16_t    pointer_format;     // DYLD_CHAINED_PTR_*
+        uint64_t    segment_offset;     // offset in memory to start of segment
+        uint32_t    max_valid_pointer;  // for 32-bit OS, any value beyond this is not a pointer
+        uint16_t    page_count;         // how many pages are in array
+        uint16_t    page_start[1];      // each entry is offset in each page of first element in chain
+                                     // or DYLD_CHAINED_PTR_START_NONE if no fixups on page
+        // uint16_t    chain_starts[1];    // some 32-bit formats may require multiple starts per page.
+                                     // for those, if high bit is set in page_starts[], then it
+                                     // is index into chain_starts[] which is a list of starts
+                                     // the last of which has the high bit set
+    }; -> bind or rebase chains 22 + list
+    
+    
+    struct dyld_chained_import_* // imports_format ->
+    {
+        uint32_t    lib_ordinal :  8,
+                    weak_import :  1,
+                    name_offset : 23;
+    };
+ */

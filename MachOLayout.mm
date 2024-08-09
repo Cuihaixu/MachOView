@@ -20,6 +20,7 @@
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 #import <mach-o/reloc.h>
+#import "ChainedFixups.h"
 
 using namespace std;
 
@@ -776,10 +777,14 @@ long hexdec(const char *hex) {
     
   if (dyld_exports_trie)
   {
-        dyldExportsTrieNode  = [self createDataNode:rootNode
-                                          caption:@"Exports Trie"
-                                         location:dyld_exports_trie->dataoff + imageOffset
-                                           length:dyld_exports_trie->datasize];
+      @try {
+          dyldExportsTrieNode = [self createExportNode:rootNode caption:@"Exports Trie"
+                                              location:dyld_exports_trie->dataoff + imageOffset
+                                                length:dyld_exports_trie->datasize
+                                           baseAddress:base_addr];
+      } @catch (NSException *exception) {
+          [self printException:exception caption:lastNodeCaption];
+      }
   }
 
   if (data_in_code_entries)
@@ -949,24 +954,11 @@ long hexdec(const char *hex) {
     {
         @try
         {
-            [self createDyldChainedFixupsNode:dyldChainedFixupsNode
-                                      caption:@"Fixups Header"
-                                     location:dyldChainedFixupsNode.dataRange.location
-                                       length:dyldChainedFixupsNode.dataRange.length];
+            [self createChainedFixupsChildNodes:dyldChainedFixupsNode
+                                       location:dyldChainedFixupsNode.dataRange.location
+                                         length:dyldChainedFixupsNode.dataRange.length];
         } @catch (NSException *exception)
         {
-            [self printException:exception caption:lastNodeCaption];
-        }
-    }
-    
-    if (dyldExportsTrieNode && dyldExportsTrieNode.dataRange.length > 0)
-    {
-        @try {
-            [self createDyldExportsTrieNode:dyldExportsTrieNode
-                                    caption:@"Exports Trie"
-                                   location:dyldExportsTrieNode.dataRange.location
-                                     length:dyldExportsTrieNode.dataRange.length];
-        } @catch (NSException *exception) {
             [self printException:exception caption:lastNodeCaption];
         }
     }

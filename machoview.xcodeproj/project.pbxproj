@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 53;
 	objects = {
 
 /* Begin PBXAggregateTarget section */
@@ -50,6 +50,7 @@
 		3CF97F0F11C91F93004CD74C /* MachOLayout.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3CF97F0E11C91F93004CD74C /* MachOLayout.mm */; };
 		7B111E4717DC33F8008ED484 /* Attach.mm in Sources */ = {isa = PBXBuildFile; fileRef = 7B111E4617DC33F8008ED484 /* Attach.mm */; };
 		7BC7AFD92A0F2B5900D90CD1 /* libcapstone.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 7BC7AFD82A0F2B5900D90CD1 /* libcapstone.a */; };
+		803838722C6634CD00D9482B /* ChainedFixups.mm in Sources */ = {isa = PBXBuildFile; fileRef = 803838712C6634CD00D9482B /* ChainedFixups.mm */; };
 		8D11072D0486CEB800E47090 /* main.mm in Sources */ = {isa = PBXBuildFile; fileRef = 29B97316FDCFA39411CA2CEA /* main.mm */; settings = {ATTRIBUTES = (); }; };
 /* End PBXBuildFile section */
 
@@ -135,6 +136,8 @@
 		7B4AD6352A0D29B2006AE04E /* en */ = {isa = PBXFileReference; lastKnownFileType = text.rtf; name = en; path = en.lproj/Credits.rtf; sourceTree = "<group>"; };
 		7B4AD6362A0D29B2006AE04E /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		7BC7AFD82A0F2B5900D90CD1 /* libcapstone.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libcapstone.a; path = capstone/libcapstone.a; sourceTree = "<group>"; };
+		803838702C6634CD00D9482B /* ChainedFixups.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ChainedFixups.h; sourceTree = "<group>"; };
+		803838712C6634CD00D9482B /* ChainedFixups.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ChainedFixups.mm; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -190,6 +193,8 @@
 				3CCC228C129EE70C0083DAE2 /* CRTFootPrints.mm */,
 				7B111E4817DC3401008ED484 /* Attach.h */,
 				7B111E4617DC33F8008ED484 /* Attach.mm */,
+				803838702C6634CD00D9482B /* ChainedFixups.h */,
+				803838712C6634CD00D9482B /* ChainedFixups.mm */,
 			);
 			name = machoview;
 			sourceTree = "<group>";
@@ -413,6 +418,7 @@
 				3CE7199F1333A4EF0005C4DA /* Layout.mm in Sources */,
 				3CF22E92144C8FC600380071 /* ObjC.mm in Sources */,
 				3C34A82B14892FF1005B53F6 /* FatLayout.mm in Sources */,
+				803838722C6634CD00D9482B /* ChainedFixups.mm in Sources */,
 				3C46C7D91687C6ED00212190 /* PreferenceController.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

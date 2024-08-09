@@ -119,6 +119,11 @@
                               location:(uint64_t)location
                                 length:(uint64_t)length;
 
+- (MVNode *) createDyldChainedFixupsHeaderNode:(MVNode *)parent
+                                       caption:(NSString *)caption
+                                      location:(uint64_t)location
+                                        length:(uint64_t)length;
+
 
 @end
 
