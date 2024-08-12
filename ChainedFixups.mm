@@ -14,6 +14,9 @@
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 
+
+
+
 union ChainedFixupPointerOnDisk
 {
     union Arm64e {
@@ -35,15 +38,16 @@ union ChainedFixupPointerOnDisk
         dyld_chained_ptr_32_bind   bind;
     };
 
-    struct Kernel64 : dyld_chained_ptr_64_kernel_cache_rebase {
-    };
+    struct Kernel64 : dyld_chained_ptr_64_kernel_cache_rebase {};
+    
+    struct Firm32 : dyld_chained_ptr_32_firmware_rebase {};
 
-    struct Firm32 : dyld_chained_ptr_32_firmware_rebase { };
-
+#if 0
     union Cache64e {
         dyld_chained_ptr_arm64e_shared_cache_rebase      regular;
         dyld_chained_ptr_arm64e_shared_cache_auth_rebase auth;
     };
+#endif
 
     typedef dyld_chained_ptr_32_cache_rebase Cache32;
 
@@ -51,15 +55,44 @@ union ChainedFixupPointerOnDisk
     Arm64e              arm64e;
     Generic64           generic64;
     Kernel64            kernel64;
+#if 0
     Cache64e            cache64e;
-
+#endif
+    
     uint32_t            raw32;
     Generic32           generic32;
     Cache32             cache32;
     Firm32              firmware32;
 };
 
+
 @implementation MachOLayout (ChainedFixups)
+
+- (unsigned)fixupsChainStrideSize:(uint16_t)pointerFormat
+{
+    switch (pointerFormat) {
+        case DYLD_CHAINED_PTR_ARM64E:
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+#if 0
+        case DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE:
+#endif
+            return 8;
+        case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+        case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+        case DYLD_CHAINED_PTR_32_FIRMWARE:
+        case DYLD_CHAINED_PTR_64:
+        case DYLD_CHAINED_PTR_64_OFFSET:
+        case DYLD_CHAINED_PTR_32:
+        case DYLD_CHAINED_PTR_32_CACHE:
+        case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+            return 4;
+        case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+            return 1;
+    }
+    assert(0 && "unsupported pointer chain format");
+}
+
 
 - (uint32_t)getImportFormatEntrySize:(uint32_t)format
 {
@@ -235,11 +268,13 @@ union ChainedFixupPointerOnDisk
                                    :[NSString stringWithFormat:@"%s", segments_64[segment]->segname]
                                    :valueInfo];
         }
+        [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+        
         for (uint32_t seg = 0; seg < segmentCount; seg++) {
             uint32_t entryOffset = dyld_chained_starts_in_image->seg_info_offset[seg];
-            const char *segname = segments_64[seg]->segname;
+//            const char *segname = segments_64[seg]->segname;
             if (entryOffset != 0) {
-                
+                [self createFixupInSegmentChainsNodes:node location:location + entryOffset length:0 segmentIndex:seg];
             }
         }
         
@@ -247,12 +282,313 @@ union ChainedFixupPointerOnDisk
     return NULL;
 }
 
-- (MVNode *) createFixupInSegmentChainsNodes:(MVNode *)parent 
+- (void) createFixupInSegmentChainsNodes:(MVNode *)parent
                                     location:(uint64_t)location
                                       length:(uint64_t)length
+                                    segmentIndex:(uint32_t)segmentIndex
 {
+    MATCH_STRUCT(dyld_chained_starts_in_segment, location);
+    /**
+     struct dyld_chained_starts_in_segment
+     {
+         uint32_t    size;               // size of this (amount kernel needs to copy)
+         uint16_t    page_size;          // 0x1000 or 0x4000
+         uint16_t    pointer_format;     // DYLD_CHAINED_PTR_*
+         uint64_t    segment_offset;     // offset in memory to start of segment
+         uint32_t    max_valid_pointer;  // for 32-bit OS, any value beyond this is not a pointer
+         uint16_t    page_count;         // how many pages are in array
+         uint16_t    page_start[1];      // each entry is offset in each page of first element in chain
+                                         // or DYLD_CHAINED_PTR_START_NONE if no fixups on page
+      // uint16_t    chain_starts[1];    // some 32-bit formats may require multiple starts per page.
+                                         // for those, if high bit is set in page_starts[], then it
+                                         // is index into chain_starts[] which is a list of starts
+                                         // the last of which has the high bit set
+     };
+     */
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    [dataController read_uint32:range lastReadHex:&lastReadHex];
+    [parent.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                             :lastReadHex
+                             :@"Size"
+                             :[NSString stringWithFormat:@"%d", dyld_chained_starts_in_segment->size]];
     
-    return NULL;
+    [dataController read_uint16:range lastReadHex:&lastReadHex];
+    [parent.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                             :lastReadHex
+                             :@"Page Size"
+                             :[NSString stringWithFormat:@"%d", dyld_chained_starts_in_segment->page_size]];
+    
+    [dataController read_uint16:range lastReadHex:&lastReadHex];
+    [parent.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                             :lastReadHex
+                             :@"Pointer Format"
+                             :[NSString stringWithFormat:@"%d", dyld_chained_starts_in_segment->pointer_format]];
+    
+    [dataController read_uint64:range lastReadHex:&lastReadHex];
+    [parent.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                             :lastReadHex
+                             :@"Segment Offset"
+                             :[NSString stringWithFormat:@"%lld", dyld_chained_starts_in_segment->segment_offset]];
+    
+    [dataController read_uint32:range lastReadHex:&lastReadHex];
+    [parent.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                             :lastReadHex
+                             :@"Max Valid Pointer"
+                             :[NSString stringWithFormat:@"%d", dyld_chained_starts_in_segment->max_valid_pointer]];
+    
+    [dataController read_uint32:range lastReadHex:&lastReadHex];
+    [parent.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                             :lastReadHex
+                             :@"Page Count"
+                             :[NSString stringWithFormat:@"%d", dyld_chained_starts_in_segment->page_count]];
+    const uint64_t segmentBuffer = segments_64[segmentIndex]->fileoff;
+    const uint64_t segmentVmaddr = segments_64[segmentIndex]->vmaddr;
+    for (uint32_t pageIndex = 0; pageIndex < dyld_chained_starts_in_segment->page_count; pageIndex++) {
+        uint16_t offsetInPage = dyld_chained_starts_in_segment->page_start[pageIndex];
+        if (offsetInPage == DYLD_CHAINED_PTR_START_NONE) {
+//            NSLog(@"segIndex: %d pageIndex: %d == DYLD_CHAINED_PTR_START_NONE", segmentIndex, pageIndex);
+            continue;
+        }
+        // [segment.base + pageIndex * pageSize + offsetInPage]
+        uint64_t pageContentStart = segmentBuffer + pageIndex * dyld_chained_starts_in_segment->page_size;
+        uint64_t vmPageContentStart = segmentVmaddr + pageIndex * dyld_chained_starts_in_segment->page_size;
+        if (offsetInPage & DYLD_CHAINED_PTR_START_MULTI) {
+            uint32_t overflowIndex = offsetInPage & ~DYLD_CHAINED_PTR_START_MULTI;
+            bool chainEnd = false;
+            while (!chainEnd) {
+                chainEnd = (dyld_chained_starts_in_segment->page_start[overflowIndex] & DYLD_CHAINED_PTR_START_LAST);
+                offsetInPage = (dyld_chained_starts_in_segment->page_start[overflowIndex] & ~DYLD_CHAINED_PTR_START_LAST);
+                [self createChainedFixupsPageNode:parent
+                                         location:pageContentStart + offsetInPage
+                                    pointerFormat:dyld_chained_starts_in_segment->pointer_format
+                                  maxValidPointer:dyld_chained_starts_in_segment->max_valid_pointer
+                                     segmentIndex:segmentIndex
+                                    targetAddress:vmPageContentStart];
+            }
+        } else {
+            [self createChainedFixupsPageNode:parent
+                                     location:pageContentStart + offsetInPage
+                                pointerFormat:dyld_chained_starts_in_segment->pointer_format
+                              maxValidPointer:dyld_chained_starts_in_segment->max_valid_pointer
+                                 segmentIndex:segmentIndex
+                                targetAddress:vmPageContentStart];
+        }
+    }
+    [parent.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+}
+
+- (void) createChainedFixupsPageNode:(MVNode *)parent
+                            location:(uint64_t)location
+                       pointerFormat:(uint16_t)format
+                     maxValidPointer:(uint32_t)maxValidPointer
+                        segmentIndex:(uint16_t)segmentIndex
+                       targetAddress:(uint64_t)targetAddress
+{
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    [parent.details appendRow:@""
+                             :@""
+                             :[NSString stringWithFormat:@"location: 0x%llx", location]
+                             :@""];
+    [parent.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+    
+    const unsigned stride = [self fixupsChainStrideSize:format];
+    bool chainEnd = false;
+    uint64_t chainPointer = location;
+    uint64_t offsetVmAddress = targetAddress;
+    while (!chainEnd) {
+        ChainedFixupPointerOnDisk *chainContent = (ChainedFixupPointerOnDisk *)[self imageAt:chainPointer];
+        [self appendPageFixupsInfoNode:parent
+                              location:chainPointer
+                          chainContent:chainContent
+                         pointerFormat:format
+                       maxValidPointer:maxValidPointer
+                          segmentIndex:segmentIndex
+                         targetAddress:offsetVmAddress];
+        switch (format) {
+            case DYLD_CHAINED_PTR_ARM64E:
+            case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+            case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+            {
+                if (chainContent->arm64e.rebase.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chainPointer += chainContent->arm64e.rebase.next * stride;
+                }
+            }
+                break;
+            case DYLD_CHAINED_PTR_64:
+            case DYLD_CHAINED_PTR_64_OFFSET:
+            {
+                if (chainContent->generic64.rebase.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chainPointer += chainContent->generic64.rebase.next * stride;
+                    offsetVmAddress += chainContent->generic64.rebase.next * stride;
+                }
+            }
+                break;
+            case DYLD_CHAINED_PTR_32:
+            {
+                if (chainContent->generic32.rebase.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chainPointer += chainContent->generic32.rebase.next * 4;
+                }
+            }
+                break;
+            case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+            case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+            {
+                if (chainContent->kernel64.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chainPointer += chainContent->kernel64.next * stride;
+                }
+            }
+                break;
+            case DYLD_CHAINED_PTR_32_FIRMWARE:
+            {
+                if (chainContent->firmware32.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chainPointer += chainContent->firmware32.next * 4;
+                }
+            }
+                break;
+            default:
+                chainEnd = true;
+                [parent.details appendRow:@""
+                                         :@""
+                                         :@""
+                                         :[NSString stringWithFormat:@"unknown pointer format 0x%04X", format]];
+                break;
+        }
+    }
+    return;
+}
+
+- (void)appendPageFixupsInfoNode:(MVNode *)parent
+                        location:(uint64_t)location
+                    chainContent:(ChainedFixupPointerOnDisk *)chainContent
+                   pointerFormat:(uint16_t)pointerFormat
+                 maxValidPointer:(uint32_t)maxValidPointer
+                    segmentIndex:(uint16_t)segmentIndex
+                targetAddress:(uint64_t)targetAddress
+{
+    switch (pointerFormat) {
+        case DYLD_CHAINED_PTR_ARM64E:
+        case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+        case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+        {
+            
+        }
+            break;
+        case DYLD_CHAINED_PTR_64:
+        case DYLD_CHAINED_PTR_64_OFFSET:
+        {
+            if (chainContent->generic64.rebase.bind) {
+                /**
+                 struct dyld_chained_ptr_64_bind
+                 {
+                     uint64_t    ordinal   : 24,
+                                 addend    :  8,   // 0 thru 255
+                                 reserved  : 19,   // all zeros
+                                 next      : 12,   // 4-byte stride
+                                 bind      :  1;   // == 1
+                 };
+                 */
+                [parent.details appendRow:[NSString stringWithFormat:@"%.8llX", location]
+                                         :[NSString stringWithFormat:@"%08llX", chainContent->raw64]
+                                         :@"BIND"
+                                         :[NSString stringWithFormat:@"target: 0x%llx (%@)", targetAddress, [self findSectionContainsRVA:targetAddress]]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Ordinal"
+                                         :[NSString stringWithFormat:@"#%d", chainContent->generic64.bind.ordinal]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Addend"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.bind.addend]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Reserved"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.bind.reserved]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Next"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.bind.next]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Bind"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.bind.bind]];
+            } else {
+                /**
+                 struct dyld_chained_ptr_64_rebase
+                 {
+                     uint64_t    target    : 36,    // 64GB max image size (DYLD_CHAINED_PTR_64 => vmAddr, DYLD_CHAINED_PTR_64_OFFSET => runtimeOffset)
+                                 high8     :  8,    // top 8 bits set to this (DYLD_CHAINED_PTR_64 => after slide added, DYLD_CHAINED_PTR_64_OFFSET => before slide added)
+                                 reserved  :  7,    // all zeros
+                                 next      : 12,    // 4-byte stride
+                                 bind      :  1;    // == 0
+                 };
+                 */
+                
+                [parent.details appendRow:[NSString stringWithFormat:@"%.8llX", location]
+                                         :[NSString stringWithFormat:@"%08llX", chainContent->raw64]
+                                         :@"REBASE"
+                                         :nil];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Target"
+                                         :[NSString stringWithFormat:@"0x%llx location:0x%llx (%@)", chainContent->generic64.rebase.target, targetAddress, [self findSectionContainsRVA:targetAddress]]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"High8"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.rebase.high8]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Reserved"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.rebase.reserved]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Next"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.rebase.next]];
+                
+                [parent.details appendRow:nil
+                                         :@""
+                                         :@"Bind"
+                                         :[NSString stringWithFormat:@"%d", chainContent->generic64.rebase.bind]];
+            }
+            [parent.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+        }
+            break;
+        case DYLD_CHAINED_PTR_32:
+        {
+            
+        }
+            break;
+        default:
+            [parent.details appendRow:@""
+                                     :@""
+                                     :@""
+                                     :[NSString stringWithFormat:@"unknown pointer type %d\n", pointerFormat]];
+            break;
+    }
 }
 
 - (MVNode *)createChainedFixupsImportNode:(MVNode *)parent
