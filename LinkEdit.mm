@@ -2490,7 +2490,8 @@ union dyld_chained_import_addend64_union
 - (MVNode *) createDyldChainedFixupsHeaderNode:(MVNode *)parent
                                        caption:(NSString *)caption
                                       location:(uint64_t)location
-                                        length:(uint64_t)length {
+                                        length:(uint64_t)length
+{
     NSRange range = NSMakeRange(location,0);
     NSString * lastReadHex;
     MVNodeSaver nodeSaver;

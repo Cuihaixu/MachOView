@@ -99,10 +99,6 @@
                                 location:(uint64_t)location
                                   length:(uint64_t)length;
 
-//- (MVNode *) createDyldChainedFixupsImportsNode:parent
-//                                 caption:(NSString *)caption
-//                                location:(uint64_t)location
-//                                  length:(uint64_t)length;
 - (MVNode *) createDyldChainedFixupsImportsNode:parent
                                  caption:(NSString *)caption
                                 location:(uint64_t)location
