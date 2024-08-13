@@ -14,9 +14,6 @@
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 
-
-
-
 union ChainedFixupPointerOnDisk
 {
     union Arm64e {
@@ -131,23 +128,19 @@ union ChainedFixupPointerOnDisk
                                   location:(uint64_t)location
                                     length:(uint64_t)length
 {
+
     /* chained fixups header */
     struct dyld_chained_fixups_header header;
     [self createChainedFixupsHeaderNode:parent
-                                caption:@"Chained Fixups Header"
+                                caption:@"Fixups Header"
                                location:location
                                  length:sizeof(struct dyld_chained_fixups_header)
                                  header:&header];
     
-    [self createChainedFixupsStartsNode:parent
-                                caption:@"Starts In Image"
-                               location:location + header.starts_offset
-                                 length:0];
-    
     uint32_t entrySize = [self getImportFormatEntrySize:header.imports_format];
     NSAssert1(entrySize != 0, @"chained fixups, unknown imports_format (%d)", header.imports_format);
     [self createChainedFixupsImportNode:parent
-                                caption:@"Imports"
+                                caption:@"Fixups Imports"
                                location:location + header.imports_offset
                                  length:header.imports_count * entrySize
                            importFormat:header.imports_format
@@ -156,9 +149,18 @@ union ChainedFixupPointerOnDisk
                             symbolsSize:length - header.symbols_offset];
     
     [self createChainedFixupsSymbolsNode:parent
-                                 caption:@"Symbols"
+                                 caption:@"Fixups Symbols"
                                 location:location + header.symbols_offset
                                   length:length - header.symbols_offset];
+    
+    [self createChainedFixupsStartsNode:parent
+                                caption:@"Fixups Starts"
+                               location:location + header.starts_offset
+                                 length:0];
+    
+  
+    
+
     return NULL;
 }
 
@@ -385,8 +387,6 @@ union ChainedFixupPointerOnDisk
                         segmentIndex:(uint16_t)segmentIndex
                        targetAddress:(uint64_t)targetAddress
 {
-    NSRange range = NSMakeRange(location,0);
-    NSString * lastReadHex;
     [parent.details appendRow:@""
                              :@""
                              :[NSString stringWithFormat:@"location: 0x%llx", location]
@@ -471,6 +471,16 @@ union ChainedFixupPointerOnDisk
     return;
 }
 
+- (NSString *)getImportDylibNameWithLibOrdinal:(uint32_t)ordinal {
+    struct dylib const *dylib = [self getDylibByIndex:ordinal];
+    switch (ordinal) {
+        case SELF_LIBRARY_ORDINAL: return @"SELF_LIBRARY_ORDINAL";
+        case DYNAMIC_LOOKUP_ORDINAL: return @"DYNAMIC_LOOKUP_ORDINAL";
+        case EXECUTABLE_ORDINAL: return @"EXECUTABLE_ORDINAL";
+        default: return [NSSTRING((uint8_t *)dylib + dylib->name.offset - sizeof(struct load_command)) lastPathComponent];
+    }
+}
+
 - (void)appendPageFixupsInfoNode:(MVNode *)parent
                         location:(uint64_t)location
                     chainContent:(ChainedFixupPointerOnDisk *)chainContent
@@ -503,10 +513,22 @@ union ChainedFixupPointerOnDisk
                                  bind      :  1;   // == 1
                  };
                  */
+                NSString *libraryName = @"Error";
+                NSString *symboName = @"Unknown Symbol Name";
+                if (chainContent->generic64.bind.ordinal < imports.size()) {
+                    struct dyld_chained_import *chainedImport = imports[chainContent->generic64.bind.ordinal];
+                    libraryName = [self getImportDylibNameWithLibOrdinal:chainedImport->lib_ordinal];
+                    symboName = [NSString stringWithFormat:@"%s", (const char *)((uintptr_t)importSymbols + chainedImport->name_offset)];
+                }
+                
                 [parent.details appendRow:[NSString stringWithFormat:@"%.8llX", location]
                                          :[NSString stringWithFormat:@"%08llX", chainContent->raw64]
                                          :@"BIND"
                                          :[NSString stringWithFormat:@"target: 0x%llx (%@)", targetAddress, [self findSectionContainsRVA:targetAddress]]];
+                [parent.details appendRow:nil
+                                         :nil
+                                         :@"SymbolName"
+                                         :[NSString stringWithFormat:@"[%@]: %@", libraryName, symboName]];
                 
                 [parent.details appendRow:nil
                                          :@""
@@ -612,6 +634,8 @@ union ChainedFixupPointerOnDisk
             case DYLD_CHAINED_IMPORT:
             {
                 MATCH_STRUCT(dyld_chained_import, currentEntry);
+                struct dyld_chained_import *chainedImpart = (struct dyld_chained_import *)[self imageAt:currentEntry];
+                imports.push_back(chainedImpart);
                 currentEntry += sizeof(struct dyld_chained_import);
                 [node.details appendRow:[NSString stringWithFormat:@"#%d", i]
                                        :nil
@@ -635,7 +659,7 @@ union ChainedFixupPointerOnDisk
                 [node.details appendRow:@""
                                        :@""
                                        :@"Weak Import"
-                                       :[NSString stringWithFormat:@"%d", dyld_chained_import->weak_import]];
+                                       :[NSString stringWithFormat:@"%d (%@)", dyld_chained_import->weak_import, dyld_chained_import->weak_import ? @"weak-import" :@"no-weak-import"]];
                 
                 NSString *symbol = nil;
                 if (dyld_chained_import->name_offset < symbolsSize) {
@@ -680,10 +704,12 @@ union ChainedFixupPointerOnDisk
                                  location:(uint64_t)location
                                    length:(uint64_t)length
 {
+    importSymbols = (char const *)[self imageAt:location];
     return [self createCStringsNode:parent
                             caption:caption
                            location:location
                              length:length];
 }
+
 
 @end

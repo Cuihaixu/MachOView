@@ -125,7 +125,6 @@ using namespace std;
       [symbolNames setObject:[NSString stringWithFormat:@"0x%qX:\"%@\"", rva, symbolName]
                       forKey:[NSNumber numberWithUnsignedLongLong:rva]];
   }
-  
   return node;
 }
 

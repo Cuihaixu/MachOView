@@ -11,6 +11,7 @@
 #include <set>
 #include <map>
 #include <cxxabi.h>
+#include <mach-o/loader.h>
 
 #import "Layout.h"
 
@@ -27,10 +28,15 @@ typedef std::vector<struct dylib_module_64 const *>       Module64Vector;
 typedef std::vector<struct data_in_code_entry const *>    DataInCodeEntryVector;
 typedef std::vector<uint32_t const *>                     IndirectSymbolVector;
 
+
 typedef std::map<uint32_t,std::pair<uint64_t,uint64_t> >        RelocMap;           // fileOffset --> <length,value>
 typedef std::map<uint64_t,std::pair<uint64_t,uint64_t> >        SegmentInfoMap;     // fileOffset --> <address,size>
 typedef std::map<uint64_t,std::pair<uint64_t,NSDictionary *> >  SectionInfoMap;     // address --> <fileOffset,sectionUserInfo>
 typedef std::map<uint64_t,uint64_t>                             ExceptionFrameMap;  // LSDA_addr  --> PCBegin_addr
+
+typedef std::vector<struct dyld_chained_import *> DyldChainedImport;
+typedef std::vector<struct dyld_chained_import_addend *> DyldChainedImportAddend;
+typedef std::vector<struct dyld_chained_import_addend64 *> DyldChainedImportAddend64;
 
 @interface MachOLayout : MVLayout 
 {
@@ -57,6 +63,11 @@ typedef std::map<uint64_t,uint64_t>                             ExceptionFrameMa
   ExceptionFrameMap       lsdaInfo;         // LSDA info lookup table by address
   
   NSMutableDictionary *   symbolNames;      // symbol names by address
+  
+  DyldChainedImport         imports;
+  DyldChainedImportAddend   importsA32;
+  DyldChainedImportAddend64 importsA64;
+  char const *              importSymbols;
 }
 
 + (MachOLayout *)layoutWithDataController:(MVDataController *)dc rootNode:(MVNode *)node;

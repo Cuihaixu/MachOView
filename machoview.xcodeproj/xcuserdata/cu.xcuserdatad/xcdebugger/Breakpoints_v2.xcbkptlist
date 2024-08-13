@@ -7,65 +7,17 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "24D48B57-B307-4EEC-B125-34A4A6D34941"
-            shouldBeEnabled = "No"
+            uuid = "35771700-4E6C-4C48-A1D2-81A33D784306"
+            shouldBeEnabled = "Yes"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
-            filePath = "ChainedFixups.mm"
+            filePath = "MachOLayout.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "547"
-            endingLineNumber = "547"
-            landmarkName = "-appendPageFixupsInfoNode:location:chainContent:pointerFormat:maxValidPointer:segmentIndex:targetAddress:"
+            startingLineNumber = "1039"
+            endingLineNumber = "1039"
+            landmarkName = "-processDyldInfo"
             landmarkType = "7">
-         </BreakpointContent>
-      </BreakpointProxy>
-      <BreakpointProxy
-         BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
-         <BreakpointContent
-            uuid = "7E62538D-EBA6-4184-9851-64B1A66C2723"
-            shouldBeEnabled = "No"
-            ignoreCount = "0"
-            continueAfterRunningActions = "No"
-            filePath = "ChainedFixups.mm"
-            startingColumnNumber = "9223372036854775807"
-            endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "552"
-            endingLineNumber = "552"
-            landmarkName = "-appendPageFixupsInfoNode:location:chainContent:pointerFormat:maxValidPointer:segmentIndex:targetAddress:"
-            landmarkType = "7">
-            <Locations>
-               <Location
-                  uuid = "7E62538D-EBA6-4184-9851-64B1A66C2723 - a5e5ec320be7586"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "-[MachOLayout(ChainedFixups) appendPageFixupsInfoNode:location:chainContent:pointerFormat:maxValidPointer:segmentIndex:targetAddress:]"
-                  moduleName = "MachOView"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/cu/Documents/Reverse/Tools/MachOView/ChainedFixups.mm"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "553"
-                  endingLineNumber = "553"
-                  offsetFromSymbolStart = "2367">
-               </Location>
-               <Location
-                  uuid = "7E62538D-EBA6-4184-9851-64B1A66C2723 - a5e5ec320be7461"
-                  shouldBeEnabled = "Yes"
-                  ignoreCount = "0"
-                  continueAfterRunningActions = "No"
-                  symbolName = "-[MachOLayout(ChainedFixups) appendPageFixupsInfoNode:location:chainContent:pointerFormat:maxValidPointer:segmentIndex:targetAddress:]"
-                  moduleName = "MachOView"
-                  usesParentBreakpointCondition = "Yes"
-                  urlString = "file:///Users/cu/Documents/Reverse/Tools/MachOView/ChainedFixups.mm"
-                  startingColumnNumber = "9223372036854775807"
-                  endingColumnNumber = "9223372036854775807"
-                  startingLineNumber = "552"
-                  endingLineNumber = "552"
-                  offsetFromSymbolStart = "2316">
-               </Location>
-            </Locations>
          </BreakpointContent>
       </BreakpointProxy>
    </Breakpoints>
