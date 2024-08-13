@@ -1019,8 +1019,8 @@ using namespace std;
                       forKey:[NSNumber numberWithUnsignedLongLong:key]];
     }
     
-    [node.details setAttributesFromRowIndex:bookmark:MVMetaDataAttributeName,symbolName,
-                                                      MVCellColorAttributeName,color,nil];
+    [node.details setAttributesFromRowIndex:bookmark: MVMetaDataAttributeName, symbolName,
+                                                      MVCellColorAttributeName, color,nil];
     [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
   } // loop
   
@@ -2469,8 +2469,6 @@ union dyld_chained_import_addend64_union
         default:
             break;
     }
-
-    
     
     return node;
 }
@@ -2480,8 +2478,6 @@ union dyld_chained_import_addend64_union
                               location:(uint64_t)location
                                 length:(uint64_t)length
 {
-    NSRange range = NSMakeRange(location,0);
-    NSString * lastReadHex;
     MVNodeSaver nodeSaver;
     MVNode * node = [parent insertChildWithDetails:caption location:location length:length saver:nodeSaver];
     return node;
@@ -2536,47 +2532,3 @@ union dyld_chained_import_addend64_union
 }
 
 @end
-/* Chained Fixups Layout
-    struct dyld_chained_fixups_header
-    {
-        uint32_t    fixups_version;    // 0
-        uint32_t    starts_offset;     // offset of dyld_chained_starts_in_image in chain_data
-        uint32_t    imports_offset;    // offset of imports table in chain_data
-        uint32_t    symbols_offset;    // offset of symbol strings in chain_data
-        uint32_t    imports_count;     // number of imported symbol names
-        uint32_t    imports_format;    // DYLD_CHAINED_IMPORT*
-        uint32_t    symbols_format;    // 0 => uncompressed, 1 => zlib compressed
-        // align8 对齐
-    }; -> 32
-    
-    struct dyld_chained_starts_in_image
-    {
-        uint32_t    seg_count;
-        uint32_t    seg_info_offset[1];  // each entry is offset into this struct for that segment
-        // followed by pool of dyld_chain_starts_in_segment data
-    }; -> seg_count * uint32_t
- 
-    struct dyld_chained_starts_in_segment
-    {
-        uint32_t    size;               // size of this (amount kernel needs to copy)
-        uint16_t    page_size;          // 0x1000 or 0x4000
-        uint16_t    pointer_format;     // DYLD_CHAINED_PTR_*
-        uint64_t    segment_offset;     // offset in memory to start of segment
-        uint32_t    max_valid_pointer;  // for 32-bit OS, any value beyond this is not a pointer
-        uint16_t    page_count;         // how many pages are in array
-        uint16_t    page_start[1];      // each entry is offset in each page of first element in chain
-                                     // or DYLD_CHAINED_PTR_START_NONE if no fixups on page
-        // uint16_t    chain_starts[1];    // some 32-bit formats may require multiple starts per page.
-                                     // for those, if high bit is set in page_starts[], then it
-                                     // is index into chain_starts[] which is a list of starts
-                                     // the last of which has the high bit set
-    }; -> bind or rebase chains 22 + list
-    
-    
-    struct dyld_chained_import_* // imports_format ->
-    {
-        uint32_t    lib_ordinal :  8,
-                    weak_import :  1,
-                    name_offset : 23;
-    };
- */

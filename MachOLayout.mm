@@ -954,9 +954,12 @@ long hexdec(const char *hex) {
     {
         @try
         {
-            [self createChainedFixupsChildNodes:dyldChainedFixupsNode
-                                       location:dyldChainedFixupsNode.dataRange.location
-                                         length:dyldChainedFixupsNode.dataRange.length];
+//            [self createChainedFixupsChildNodes:dyldChainedFixupsNode
+//                                       location:dyldChainedFixupsNode.dataRange.location
+//                                         length:dyldChainedFixupsNode.dataRange.length];
+            [self createChainedFixupsParseNode:dyldChainedFixupsNode
+                                      location:dyldChainedFixupsNode.dataRange.location
+                                        length:dyldChainedFixupsNode.dataRange.length];
         } @catch (NSException *exception)
         {
             [self printException:exception caption:lastNodeCaption];

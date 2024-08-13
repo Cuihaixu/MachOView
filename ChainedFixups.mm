@@ -62,6 +62,272 @@ union ChainedFixupPointerOnDisk
     Firm32              firmware32;
 };
 
+template <typename T>
+static T align8(T value)
+{
+    return (value + 7) & (-8);
+}
+
+struct ChainedFixups
+{
+public:
+    ChainedFixups(const dyld_chained_fixups_header* fixupInfo, size_t size) : _fixupsHeader(fixupInfo), _fixupsSize(size) {}
+    
+    static const char* importsFormatName(uint32_t format) {
+        switch (format) {
+            case DYLD_CHAINED_IMPORT:
+                return "DYLD_CHAINED_IMPORT";
+            case DYLD_CHAINED_IMPORT_ADDEND:
+                return "DYLD_CHAINED_IMPORT_ADDEND";
+            case DYLD_CHAINED_IMPORT_ADDEND64:
+                return "DYLD_CHAINED_IMPORT_ADDEND64";
+        }
+        return "unknown";
+    }
+    
+    static uint32_t importsFormatStride(uint32_t format) {
+        switch (format) {
+            case DYLD_CHAINED_IMPORT: return sizeof(dyld_chained_import);
+            case DYLD_CHAINED_IMPORT_ADDEND: return sizeof(dyld_chained_import_addend);
+            case DYLD_CHAINED_IMPORT_ADDEND64: return sizeof(dyld_chained_import_addend64);
+            default: return 0;
+        }
+    }
+    
+    uint32_t importsFormatStride(void)
+    {
+        return importsFormatStride(_fixupsHeader->imports_format);
+    }
+    
+    const char* importsFormatName() const {
+        return importsFormatName(_fixupsHeader->imports_offset);
+    }
+    
+    static const char* pointerFormat(uint16_t format)
+    {
+        switch (format) {
+            case DYLD_CHAINED_PTR_ARM64E:
+                return "authenticated arm64e, 8-byte stride, target vmadddr";
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+                return "authenticated arm64e, 8-byte stride, target vmoffset";
+            case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+                return "authenticated arm64e, 4-byte stride, target vmadddr";
+            case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+                return "authenticated arm64e, 4-byte stride, target vmoffset";
+            case DYLD_CHAINED_PTR_64:
+                return "generic 64-bit, 4-byte stride, target vmadddr";
+            case DYLD_CHAINED_PTR_64_OFFSET:
+                return "generic 64-bit, 4-byte stride, target vmoffset ";
+            case DYLD_CHAINED_PTR_32:
+                return "generic 32-bit";
+            case DYLD_CHAINED_PTR_32_CACHE:
+                return "32-bit for dyld cache";
+            case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+                return "64-bit for kernel cache";
+            case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+                return "64-bit for x86_64 kernel cache";
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+                return "authenticated arm64e, 8-byte stride, target vmoffset, 24-bit bind ordinals";
+        }
+        return "unknown";
+    }
+    
+    static const char *pointerFormatName(uint16_t format)
+    {
+        switch (format) {
+            case DYLD_CHAINED_PTR_ARM64E:
+                return "DYLD_CHAINED_PTR_ARM64E";
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+                return "DYLD_CHAINED_PTR_ARM64E_USERLAND";
+            case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+                return "DYLD_CHAINED_PTR_ARM64E_FIRMWARE";
+            case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+                return "DYLD_CHAINED_PTR_ARM64E_KERNEL";
+            case DYLD_CHAINED_PTR_64:
+                return "DYLD_CHAINED_PTR_64";
+            case DYLD_CHAINED_PTR_64_OFFSET:
+                return "DYLD_CHAINED_PTR_64_OFFSET";
+            case DYLD_CHAINED_PTR_32:
+                return "DYLD_CHAINED_PTR_32";
+            case DYLD_CHAINED_PTR_32_CACHE:
+                return "DYLD_CHAINED_PTR_32_CACHE";
+            case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+                return "DYLD_CHAINED_PTR_64_KERNEL_CACHE";
+            case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+                return "DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE";
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+                return "DYLD_CHAINED_PTR_ARM64E_USERLAND24";
+        }
+        return "unknown";
+    }
+    
+    static const char *chainedPtrStartName(uint16_t offsetInPage) {
+        if (offsetInPage == DYLD_CHAINED_PTR_START_NONE)
+        {
+            return "DYLD_CHAINED_PTR_START_NONE";
+        }
+        if (offsetInPage & DYLD_CHAINED_PTR_START_MULTI)
+        {
+            return "DYLD_CHAINED_PTR_START_MULTI";
+        } else {
+            return "PAGE_ONE_CHAIN\nTESt";
+        }
+        return "unknown";
+    }
+    
+    const dyld_chained_fixups_header *getFixupsHeader(void) const
+    {
+        return _fixupsHeader;
+    }
+    uint32_t getFixupsHeaderSize(void) const
+    {
+        return _fixupsHeader->starts_offset;
+    }
+    
+    const dyld_chained_starts_in_image *getImageStarts(void) const
+    {
+        if (_fixupsHeader->starts_offset == 0) {
+            return nullptr;
+        }
+        return (const dyld_chained_starts_in_image *)((uintptr_t)_fixupsHeader + _fixupsHeader->starts_offset);
+    }
+    
+    size_t getImageStartsSize(void) const
+    {
+        return _fixupsHeader->starts_offset - _fixupsHeader->imports_offset;
+    }
+    
+    const char *getSymbolsPool(void) const
+    {
+        if (_fixupsHeader->symbols_offset == 0) {
+            return nullptr;
+        }
+        return (const char *)((uintptr_t)_fixupsHeader + _fixupsHeader->symbols_offset);
+    }
+    
+    const char *getSymbolName(uint32_t nameOffset)
+    {
+        const char *symbolsPool = getSymbolsPool();
+        size_t poolSize = getSymbolsPoolSize();
+        if (symbolsPool == nullptr || poolSize < 1 || nameOffset >= poolSize) {
+            return "Unknown symbols";
+        }
+        return &symbolsPool[nameOffset];
+    }
+    
+    size_t getSymbolsPoolSize(void) const
+    {
+        return _fixupsSize - _fixupsHeader->symbols_offset;
+    }
+
+    void * getFixupsImports(void) const
+    {
+        return (void *)((uintptr_t)_fixupsHeader + _fixupsHeader->imports_offset);
+    }
+    
+    size_t getFixupsImportsSize(void) const
+    {
+        return _fixupsHeader->symbols_offset - _fixupsHeader->imports_offset;
+    }
+    
+    const dyld_chained_starts_in_segment* startsForSegment(uint32_t segIndex) const
+    {
+        const dyld_chained_starts_in_image* imageStarts = (dyld_chained_starts_in_image*)((uint8_t*)_fixupsHeader + _fixupsHeader->starts_offset);
+        if ( segIndex >= imageStarts->seg_count )
+            return nullptr;
+        uint32_t segInfoOffset = imageStarts->seg_info_offset[segIndex];
+        if ( segInfoOffset == 0 )
+            return nullptr;
+        return (dyld_chained_starts_in_segment*)((uint8_t*)imageStarts + segInfoOffset);
+    }
+    
+    void forEachFixupInSegmentChains(const dyld_chained_starts_in_segment *segInfo,
+                                     void(^callback)(uint32_t pageIndex, uint16_t pageSize, uint16_t offsetInPage))
+    {
+        
+        for (uint32_t pageIndex = 0; pageIndex < segInfo->page_count; pageIndex++) {
+            uint16_t offsetInPage = segInfo->page_start[pageIndex];
+            if (offsetInPage == DYLD_CHAINED_PTR_START_NONE) { // 当前页面没有修复内容
+                continue;
+            }
+            if (offsetInPage & DYLD_CHAINED_PTR_START_MULTI) { // 多个指针开始
+                uint32_t overflowIndex = offsetInPage & ~DYLD_CHAINED_PTR_START_MULTI; // 获取索引
+                bool chainEnd = false; // 修复链结束
+                while ( !chainEnd ) {
+                    // 如果是 LIST 类型不是 MUTLI 则表示遍历结束
+                    chainEnd = (segInfo->page_start[overflowIndex] & DYLD_CHAINED_PTR_START_LAST);
+                    // 清除标志位
+                    uint16_t  startOffset = (segInfo->page_start[overflowIndex] & ~DYLD_CHAINED_PTR_START_LAST);
+//                    uint32_t* chainStart  = (uint32_t*)((uint8_t*)(segments[segmentIndex].content) + startOffset);
+
+                    ++overflowIndex;
+                }
+            } else {
+//                uint8_t* pageContentStart = (uint8_t *)(segmentContent + (pageIndex * segStarts->page_size));
+//                ChainedFixupPointerOnDisk *chain = (ChainedFixupPointerOnDisk*)(pageContentStart+offsetInPage);
+                
+            }
+        }
+    }
+    
+    union ImportUnion
+    {
+        struct dyld_chained_import *imports;
+        struct dyld_chained_import_addend *importsA32;
+        struct dyld_chained_import_addend64 *importsA64;
+        const void *rawPointer;
+    };
+    
+    struct ImportTable
+    {
+        uint32_t format;
+        uint32_t count;
+        union {
+            dyld_chained_import *imports;
+            dyld_chained_import_addend *importsA32;
+            dyld_chained_import_addend64 *importsA64;
+            void *rawTable;
+        } value;
+    };
+    
+    bool getImports(ImportTable &table)
+    {
+        if (importsFormatStride() == 0) {
+            return false;
+        }
+        table.format = _fixupsHeader->imports_format;
+        table.count = _fixupsHeader->imports_count;
+        table.value.rawTable = getFixupsImports();
+        return true;
+    }
+    
+//    void forEachImports(void(^callback)(uint32_t importFormat, uint32_t index, union ImportUnion importUnion))
+//    {
+//        union ImportUnion currentImport;
+//        const dyld_chained_import *imports = (const dyld_chained_import *)getFixupsImports();
+//        const dyld_chained_import_addend *importsA32 = (const dyld_chained_import_addend *)imports;
+//        const dyld_chained_import_addend64 *importsA64 = (const dyld_chained_import_addend64 *)imports;
+//        for (uint32_t index = 0; index < _fixupsHeader->imports_count; index++) {
+//            switch (_fixupsHeader->imports_format) {
+//                case DYLD_CHAINED_IMPORT:
+//                    currentImport.importValue = imports[index];
+//                    break;
+//                case DYLD_CHAINED_IMPORT_ADDEND:
+//                    currentImport.importA32Value = importsA32[index];
+//                    break;
+//                case DYLD_CHAINED_IMPORT_ADDEND64:
+//                    currentImport.importA64Value = importsA64[index];
+//                default:
+//                    break;
+//            }
+//        }
+//    }
+    
+private:
+    const dyld_chained_fixups_header*          _fixupsHeader = nullptr;
+    size_t                                     _fixupsSize   = 0;
+    std::vector<union ImportUnion>             _imports;
+};
 
 @implementation MachOLayout (ChainedFixups)
 
@@ -124,11 +390,382 @@ union ChainedFixupPointerOnDisk
     }
 }
 
+- (MVNode *) createChainedFixupsParseNode:(MVNode *)parent
+                                 location:(uint64_t)location
+                                   length:(uint64_t)length {
+    const dyld_chained_fixups_header *fixupsHeader = nullptr;
+    fixupsHeader = (const dyld_chained_fixups_header *)[self imageAt:location];
+    ChainedFixups chainedFixups(fixupsHeader, length);
+    
+    [self createChainedFixupsHeaderNode:parent location:location
+                                 length:chainedFixups.getFixupsHeaderSize()
+                          chainedFixups:chainedFixups];
+    
+    [self createChainedFixupsImageStartsNode:parent
+                                    location:location + fixupsHeader->starts_offset
+                                      length:chainedFixups.getImageStartsSize()
+                               chainedFixups:chainedFixups];
+    
+    [self createChainedFixupsImportsNode:parent
+                                location:location + fixupsHeader->imports_offset
+                                  length:chainedFixups.getFixupsImportsSize()
+                           chainedFixups:chainedFixups];
+    
+    [self createChainedFixupsSymbolsPoolNode:parent
+                                    location:location + fixupsHeader->symbols_offset
+                                      length:chainedFixups.getSymbolsPoolSize()];
+    
+    return NULL;
+}
+
+- (MVNode *) createChainedFixupsHeaderNode:(MVNode *)parent
+                                  location:(uint64_t)location
+                                    length:(uint64_t)length
+                             chainedFixups:(ChainedFixups &)chainedFixups
+{
+    size_t headerSize = 0;
+    const dyld_chained_fixups_header *fixupsHeader = nullptr;
+    fixupsHeader = chainedFixups.getFixupsHeader();
+    headerSize = chainedFixups.getFixupsHeaderSize();
+    if (fixupsHeader == nullptr || headerSize == 0) {
+        return nullptr;
+    }
+    MVNode *dataNode = [self createDataNode:parent
+                                    caption:@"Fixups Header"
+                                   location:location
+                                     length:headerSize];
+    
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [dataNode insertChildWithDetails:@"dyld_chained_fixups_header" location:location length:headerSize saver:nodeSaver];
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Fixups Version"
+                               :[NSString stringWithFormat:@"%d", fixupsHeader->fixups_version]];
+    }
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Starts Offset"
+                               :[NSString stringWithFormat:@"%d (0x%llx)", fixupsHeader->starts_offset,
+                                location + fixupsHeader->starts_offset]];
+    }
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Offset"
+                               :[NSString stringWithFormat:@"%d (0x%llx)", fixupsHeader->imports_offset,
+                                location + fixupsHeader->imports_offset]];
+    }
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Symbols Offset"
+                               :[NSString stringWithFormat:@"%d (0x%llx)", fixupsHeader->symbols_offset,
+                                location + fixupsHeader->symbols_format]];
+        
+    }
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Count"
+                               :[NSString stringWithFormat:@"%d", fixupsHeader->imports_count]];
+        
+    }
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Imports Format"
+                               :[NSString stringWithFormat:@"%d (%@)", fixupsHeader->imports_format,
+                                [self chainedFixupsImportFormatName:fixupsHeader->imports_format]]];
+        
+    }
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Symbols Format"
+                               :[NSString stringWithFormat:@"%d (%@)", fixupsHeader->symbols_format,
+                                [self chainedFixupsSymbolFormatName:fixupsHeader->symbols_format]]];
+    }
+    return node;
+}
+
+- (MVNode *) createChainedFixupsImageStartsNode:(MVNode *)parent
+                                       location:(uint64_t)location
+                                         length:(uint64_t)length
+                                  chainedFixups:(ChainedFixups &)chainedFixups
+{
+    MVNode *dataNode = [self createDataNode:parent caption:@"Fixups Starts" location:location length:length];
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    const dyld_chained_starts_in_image *imageStarts = chainedFixups.getImageStarts();
+    MVNode * node = [dataNode insertChildWithDetails:@"Fixups Image Starts"
+                                            location:location length:imageStarts->seg_count + 1 * sizeof(uint32_t) saver:nodeSaver];
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Segment Info Count"
+                               :[NSString stringWithFormat:@"%d", imageStarts->seg_count]];
+    }
+    {
+        for (uint32_t segmentIndex = 0; segmentIndex < imageStarts->seg_count; segmentIndex++) {
+            [dataController read_uint32:range lastReadHex:&lastReadHex];
+            [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                   :lastReadHex
+                                   :@"Segment Info Offset"
+                                   :[NSString stringWithFormat:@"%d (%s)", imageStarts->seg_info_offset[segmentIndex], segments_64[segmentIndex]->segname]];
+        }
+        [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+    }
+    
+    for (uint32_t segmentIndex = 0; segmentIndex < imageStarts->seg_count; segmentIndex++) {
+        uint32_t segmentInfoOffset = imageStarts->seg_info_offset[segmentIndex];
+        if (segmentInfoOffset == 0) {
+            continue;
+        }
+        const dyld_chained_starts_in_segment *segInfo = chainedFixups.startsForSegment(segmentIndex);
+        [self createChainedFixupsSegmentInfoNode:dataNode
+                                        location:location + segmentInfoOffset
+                                          length:segInfo->size
+                                    segmentIndex:segmentIndex
+                                   chainedFixups:chainedFixups];
+    }
+    return dataNode;
+}
+
+- (MVNode *) createChainedFixupsSegmentInfoNode:(MVNode *)parent
+                                       location:(uint64_t)location
+                                         length:(uint64_t)length
+                                   segmentIndex:(uint32_t)segmentIndex
+                                  chainedFixups:(ChainedFixups &)chainedFixups
+{
+    const dyld_chained_starts_in_segment *segStarts = chainedFixups.startsForSegment(segmentIndex);
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [parent insertChildWithDetails:[NSString stringWithFormat:@"Fixups Segment (%s)", segments_64[segmentIndex]->segname]
+                                          location:location length:length saver:nodeSaver];
+    {
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Size"
+                               :[NSString stringWithFormat:@"%d", segStarts->size]];
+        
+        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Page Size"
+                               :[NSString stringWithFormat:@"%d", segStarts->page_size]];
+        
+        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Pointer Format"
+                               :[NSString stringWithFormat:@"%d (%s)", segStarts->pointer_format,
+                                             ChainedFixups::pointerFormatName(segStarts->pointer_format)]];
+        
+        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [dataController read_uint64:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Segment Offset"
+                               :[NSString stringWithFormat:@"%lld (%s)", segStarts->segment_offset, segments_64[segmentIndex]->segname]];
+        
+        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Max Valid Pointer"
+                               :[NSString stringWithFormat:@"%d", segStarts->max_valid_pointer]];
+        
+        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Page Count"
+                               :[NSString stringWithFormat:@"%d", segStarts->page_count]];
+        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+        
+        for (uint32_t pageIndex = 0; pageIndex < segStarts->page_count; pageIndex++) {
+            uint16_t offsetInPage = [dataController read_uint16:range lastReadHex:&lastReadHex];
+            [node.details appendRow:[NSString stringWithFormat:@"#%d", pageIndex] :nil :@"Page Index" :nil];
+            [node.details setAttributes:MVCellColorAttributeName, [NSColor greenColor], nil];
+            [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                   :lastReadHex
+                                   :@"Offset In Page"
+                                   :[NSString stringWithFormat:@"%d", offsetInPage]];
+            [node.details appendRow:nil :nil
+                                   :@"Chain Ptr Type"
+                                   :[NSString stringWithFormat:@"%s", ChainedFixups::chainedPtrStartName(offsetInPage)]];
+            [node.details appendRow:nil :nil :@"Page Address" :[NSString stringWithFormat:@"0x%llx", segStarts->segment_offset + pageIndex * segStarts->page_size]];
+            [node.details appendRow:@"" :@"" :@"Fixups Chain Starts" :
+            [NSString stringWithFormat:@"0x%llx + $%d", segStarts->segment_offset + (pageIndex * segStarts->page_size) + offsetInPage, offsetInPage]];
+            [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+        }
+    }
+    return node;
+}
+
+- (MVNode *) insertChainedFixupsChainStartsNode:(MVNode *)parent
+                                       location:(uint64_t)location
+                                         length:(uint64_t)length
+                                   segmentIndex:(uint32_t)segmentIndex
+                                      pageIndex:(uint32_t)pageIndex
+                                  chainedFixups:(ChainedFixups &)chainedFixups
+{
+    
+    
+    
+    return nil;
+}
+
+- (MVNode *) createChainedFixupsImportsNode:(MVNode *)parent
+                                  location:(uint64_t)location
+                                    length:(uint64_t)length
+                             chainedFixups:(ChainedFixups &)chainedFixups
+{
+    MVNode *dataNode = [self createDataNode:parent caption:@"Fixups Imports" location:location length:length];
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNode * node = [dataNode insertChildWithDetails:@"Imports Table"
+                                            location:location
+                                              length:length saver:nodeSaver];
+    uint32_t importCount = chainedFixups.getFixupsHeader()->imports_count;
+    uint32_t importFormat = chainedFixups.getFixupsHeader()->imports_format;
+    
+    union ChainedFixups::ImportUnion importUnion;
+    importUnion.rawPointer = [self imageAt:location];
+    for (uint32_t index = 0; index < importCount; index++) {
+        [node.details appendRow:[NSString stringWithFormat:@"#%d", index] :nil :nil :nil];
+        switch (importFormat) {
+            case DYLD_CHAINED_IMPORT:
+            {
+                const dyld_chained_import *importInfo = &importUnion.imports[index];
+                [dataController read_uint32:range lastReadHex:&lastReadHex];
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                       :lastReadHex
+                                       :@"Import Info"
+                                       :@"DYLD_CHAINED_IMPORT"];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Lib Ordinal"
+                                       :[NSString stringWithFormat:@"%d (%@)", importInfo->lib_ordinal, [self getImportDylibNameWithLibOrdinal:importInfo->lib_ordinal]]];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Weak Import"
+                                       :[NSString stringWithFormat:@"%d", importInfo->weak_import]];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Name Offset"
+                                       :[NSString stringWithFormat:@"#%d (%s)", importInfo->name_offset, chainedFixups.getSymbolName(importInfo->name_offset)]];
+            }
+                break;
+            case DYLD_CHAINED_IMPORT_ADDEND:
+            {
+                const dyld_chained_import_addend *importInfo = &importUnion.importsA32[index];
+                [dataController read_uint32:range lastReadHex:&lastReadHex];
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                       :lastReadHex
+                                       :@"Import Info"
+                                       :@"DYLD_CHAINED_IMPORT_ADDEND"];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Lib Ordinal"
+                                       :[NSString stringWithFormat:@"%d (%@)", importInfo->lib_ordinal, [self getImportDylibNameWithLibOrdinal:importInfo->lib_ordinal]]];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Weak Import"
+                                       :[NSString stringWithFormat:@"%d", importInfo->weak_import]];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Name Offset"
+                                       :[NSString stringWithFormat:@"#%d (%s)", importInfo->name_offset, chainedFixups.getSymbolName(importInfo->name_offset)]];
+                
+                [dataController read_uint32:range lastReadHex:&lastReadHex];
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                       :lastReadHex
+                                       :@"Addend"
+                                       :[NSString stringWithFormat:@"%d", importInfo->addend]];
+                
+            }
+                break;
+            case DYLD_CHAINED_IMPORT_ADDEND64:
+            {
+                const dyld_chained_import_addend64 *importInfo = &importUnion.importsA64[index];
+                [dataController read_uint64:range lastReadHex:&lastReadHex];
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                       :lastReadHex
+                                       :@"Import Info"
+                                       :@"DYLD_CHAINED_IMPORT_ADDEND64"];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Lib Ordinal"
+                                       :[NSString stringWithFormat:@"%d (%@)", importInfo->lib_ordinal, [self getImportDylibNameWithLibOrdinal:importInfo->lib_ordinal]]];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Reserved"
+                                       :[NSString stringWithFormat:@"%d", importInfo->reserved]];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Weak Import"
+                                       :[NSString stringWithFormat:@"%d", importInfo->weak_import]];
+                
+                [node.details appendRow:@"" :@""
+                                       :@"Name Offset"
+                                       :[NSString stringWithFormat:@"#%d (%s)", importInfo->name_offset, chainedFixups.getSymbolName(importInfo->name_offset)]];
+                
+                [dataController read_uint32:range lastReadHex:&lastReadHex];
+                [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                       :lastReadHex
+                                       :@"Addend"
+                                       :[NSString stringWithFormat:@"%lld", importInfo->addend]];
+            }
+                break;
+            default:
+                
+                break;
+        }
+        [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+    }
+    return node;
+}
+
+- (MVNode *) createChainedFixupsSymbolsPoolNode:(MVNode *)parent
+                                  location:(uint64_t)location
+                                    length:(uint64_t)length
+{
+    MVNode *dataNode = [self createDataNode:parent caption:@"Fixups Symbols" location:location length:length];
+    return [self createCStringsNode:dataNode
+                            caption:@"C String Literals"
+                           location:location
+                             length:length];
+}
+
+
+
 - (MVNode *) createChainedFixupsChildNodes:(MVNode *)parent
                                   location:(uint64_t)location
                                     length:(uint64_t)length
 {
-
+    
+    
+    
     /* chained fixups header */
     struct dyld_chained_fixups_header header;
     [self createChainedFixupsHeaderNode:parent
@@ -344,6 +981,7 @@ union ChainedFixupPointerOnDisk
                              :lastReadHex
                              :@"Page Count"
                              :[NSString stringWithFormat:@"%d", dyld_chained_starts_in_segment->page_count]];
+    
     const uint64_t segmentBuffer = segments_64[segmentIndex]->fileoff;
     const uint64_t segmentVmaddr = segments_64[segmentIndex]->vmaddr;
     for (uint32_t pageIndex = 0; pageIndex < dyld_chained_starts_in_segment->page_count; pageIndex++) {
@@ -713,3 +1351,48 @@ union ChainedFixupPointerOnDisk
 
 
 @end
+
+/* Chained Fixups Layout
+    struct dyld_chained_fixups_header
+    {
+        uint32_t    fixups_version;    // 0
+        uint32_t    starts_offset;     // offset of dyld_chained_starts_in_image in chain_data
+        uint32_t    imports_offset;    // offset of imports table in chain_data
+        uint32_t    symbols_offset;    // offset of symbol strings in chain_data
+        uint32_t    imports_count;     // number of imported symbol names
+        uint32_t    imports_format;    // DYLD_CHAINED_IMPORT*
+        uint32_t    symbols_format;    // 0 => uncompressed, 1 => zlib compressed
+        // align8 对齐
+    }; -> 32
+    
+    struct dyld_chained_starts_in_image
+    {
+        uint32_t    seg_count;
+        uint32_t    seg_info_offset[1];  // each entry is offset into this struct for that segment
+        // followed by pool of dyld_chain_starts_in_segment data
+    }; -> seg_count * uint32_t
+ 
+    struct dyld_chained_starts_in_segment
+    {
+        uint32_t    size;               // size of this (amount kernel needs to copy)
+        uint16_t    page_size;          // 0x1000 or 0x4000
+        uint16_t    pointer_format;     // DYLD_CHAINED_PTR_*
+        uint64_t    segment_offset;     // offset in memory to start of segment
+        uint32_t    max_valid_pointer;  // for 32-bit OS, any value beyond this is not a pointer
+        uint16_t    page_count;         // how many pages are in array
+        uint16_t    page_start[1];      // each entry is offset in each page of first element in chain
+                                     // or DYLD_CHAINED_PTR_START_NONE if no fixups on page
+        // uint16_t    chain_starts[1];    // some 32-bit formats may require multiple starts per page.
+                                     // for those, if high bit is set in page_starts[], then it
+                                     // is index into chain_starts[] which is a list of starts
+                                     // the last of which has the high bit set
+    }; -> bind or rebase chains 22 + list
+    
+    
+    struct dyld_chained_import_* // imports_format ->
+    {
+        uint32_t    lib_ordinal :  8,
+                    weak_import :  1,
+                    name_offset : 23;
+    };
+ */
