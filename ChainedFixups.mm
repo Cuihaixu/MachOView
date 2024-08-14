@@ -241,33 +241,53 @@ public:
         return (dyld_chained_starts_in_segment*)((uint8_t*)imageStarts + segInfoOffset);
     }
     
-    void forEachFixupInSegmentChains(const dyld_chained_starts_in_segment *segInfo,
-                                     void(^callback)(uint32_t pageIndex, uint16_t pageSize, uint16_t offsetInPage))
+    void forEachFixupChainSegment(const dyld_chained_starts_in_image* starts,
+                                  void (^handler)(const dyld_chained_starts_in_segment* segInfo, uint32_t segIndex, bool& stop)) const {
+        bool stopped = false;
+        for (uint32_t segIndex=0; segIndex < starts->seg_count && !stopped; ++segIndex) {
+            if ( starts->seg_info_offset[segIndex] == 0 )
+                continue;
+            const dyld_chained_starts_in_segment* segInfo = (dyld_chained_starts_in_segment*)((uint8_t*)starts + starts->seg_info_offset[segIndex]);
+            handler(segInfo, segIndex, stopped);
+        }
+    }
+    
+    
+    
+    void forEachFixupInSegmentChains(const dyld_chained_starts_in_segment* segInfo,
+                                     bool notifyNonPointers, uint8_t* segmentContent,
+                                     void (^handler)(uint32_t pageIndex, uint16_t offsetInPage, ChainedFixupPointerOnDisk* fixupLocation, bool& stop))
     {
-        
-        for (uint32_t pageIndex = 0; pageIndex < segInfo->page_count; pageIndex++) {
+        bool stopped = false;
+        for (uint32_t pageIndex = 0; pageIndex < segInfo->page_count && !stopped; pageIndex++) {
             uint16_t offsetInPage = segInfo->page_start[pageIndex];
-            if (offsetInPage == DYLD_CHAINED_PTR_START_NONE) { // 当前页面没有修复内容
+            if (offsetInPage == DYLD_CHAINED_PTR_START_NONE) {
                 continue;
             }
-            if (offsetInPage & DYLD_CHAINED_PTR_START_MULTI) { // 多个指针开始
-                uint32_t overflowIndex = offsetInPage & ~DYLD_CHAINED_PTR_START_MULTI; // 获取索引
-                bool chainEnd = false; // 修复链结束
-                while ( !chainEnd ) {
-                    // 如果是 LIST 类型不是 MUTLI 则表示遍历结束
+            if (offsetInPage & DYLD_CHAINED_PTR_START_MULTI) {
+                uint32_t overflowIndex = offsetInPage & ~DYLD_CHAINED_PTR_START_MULTI;
+                bool chainEnd = false;
+                while (!chainEnd) {
                     chainEnd = (segInfo->page_start[overflowIndex] & DYLD_CHAINED_PTR_START_LAST);
-                    // 清除标志位
-                    uint16_t  startOffset = (segInfo->page_start[overflowIndex] & ~DYLD_CHAINED_PTR_START_LAST);
-//                    uint32_t* chainStart  = (uint32_t*)((uint8_t*)(segments[segmentIndex].content) + startOffset);
-
+                    offsetInPage = (segInfo->page_start[overflowIndex] & ~DYLD_CHAINED_PTR_START_LAST);
+                    uint8_t* pageContentStart = segmentContent + (pageIndex * segInfo->page_size);
+                    ChainedFixupPointerOnDisk* chain = (ChainedFixupPointerOnDisk*)(pageContentStart+offsetInPage);
+                    stopped = walkChain(chain, segInfo->pointer_format, notifyNonPointers, segInfo->max_valid_pointer, handler);
                     ++overflowIndex;
                 }
             } else {
-//                uint8_t* pageContentStart = (uint8_t *)(segmentContent + (pageIndex * segStarts->page_size));
-//                ChainedFixupPointerOnDisk *chain = (ChainedFixupPointerOnDisk*)(pageContentStart+offsetInPage);
-                
+                uint8_t *pageContentStart = (uint8_t *)(segmentContent + (pageIndex * segInfo->page_size));
+                ChainedFixupPointerOnDisk *chain = (ChainedFixupPointerOnDisk *)(pageContentStart + offsetInPage);
+                stopped = walkChain(chain, segInfo->pointer_format, notifyNonPointers, segInfo->max_valid_pointer, handler);
             }
         }
+    }
+    
+    bool walkChain( ChainedFixupPointerOnDisk* chain, uint16_t pointer_format, bool notifyNonPointers, uint32_t max_valid_pointer,
+                   void (^handler)(uint32_t pageIndex, uint16_t offsetInPage, ChainedFixupPointerOnDisk* fixupLocation, bool& stop)) {
+        
+        
+        return false;
     }
     
     union ImportUnion
@@ -278,55 +298,9 @@ public:
         const void *rawPointer;
     };
     
-    struct ImportTable
-    {
-        uint32_t format;
-        uint32_t count;
-        union {
-            dyld_chained_import *imports;
-            dyld_chained_import_addend *importsA32;
-            dyld_chained_import_addend64 *importsA64;
-            void *rawTable;
-        } value;
-    };
-    
-    bool getImports(ImportTable &table)
-    {
-        if (importsFormatStride() == 0) {
-            return false;
-        }
-        table.format = _fixupsHeader->imports_format;
-        table.count = _fixupsHeader->imports_count;
-        table.value.rawTable = getFixupsImports();
-        return true;
-    }
-    
-//    void forEachImports(void(^callback)(uint32_t importFormat, uint32_t index, union ImportUnion importUnion))
-//    {
-//        union ImportUnion currentImport;
-//        const dyld_chained_import *imports = (const dyld_chained_import *)getFixupsImports();
-//        const dyld_chained_import_addend *importsA32 = (const dyld_chained_import_addend *)imports;
-//        const dyld_chained_import_addend64 *importsA64 = (const dyld_chained_import_addend64 *)imports;
-//        for (uint32_t index = 0; index < _fixupsHeader->imports_count; index++) {
-//            switch (_fixupsHeader->imports_format) {
-//                case DYLD_CHAINED_IMPORT:
-//                    currentImport.importValue = imports[index];
-//                    break;
-//                case DYLD_CHAINED_IMPORT_ADDEND:
-//                    currentImport.importA32Value = importsA32[index];
-//                    break;
-//                case DYLD_CHAINED_IMPORT_ADDEND64:
-//                    currentImport.importA64Value = importsA64[index];
-//                default:
-//                    break;
-//            }
-//        }
-//    }
-    
 private:
     const dyld_chained_fixups_header*          _fixupsHeader = nullptr;
     size_t                                     _fixupsSize   = 0;
-    std::vector<union ImportUnion>             _imports;
 };
 
 @implementation MachOLayout (ChainedFixups)
@@ -517,30 +491,39 @@ private:
                                :lastReadHex
                                :@"Segment Info Count"
                                :[NSString stringWithFormat:@"%d", imageStarts->seg_count]];
-    }
-    {
+        [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        
         for (uint32_t segmentIndex = 0; segmentIndex < imageStarts->seg_count; segmentIndex++) {
             [dataController read_uint32:range lastReadHex:&lastReadHex];
+            [node.details appendRow:[NSString stringWithFormat:@"#%d", segmentIndex]
+                                   :@""
+                                   :[NSString stringWithFormat:@"Segment (%s)", segments_64[segmentIndex]->segname]
+                                   :nil];
+            
+            uint32_t offset = imageStarts->seg_info_offset[segmentIndex];
+            NSString *offsetInfo = nil;
+            if (offset == 0) {
+                offsetInfo = @"0 (NO FIXUPS)";
+            } else {
+                offsetInfo = [NSString stringWithFormat:@"%d (0x%llx)", offset, location + offset];
+            }
             [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                    :lastReadHex
-                                   :@"Segment Info Offset"
-                                   :[NSString stringWithFormat:@"%d (%s)", imageStarts->seg_info_offset[segmentIndex], segments_64[segmentIndex]->segname]];
+                                   :[NSString stringWithFormat:@"Starts Offset"]
+                                   :offsetInfo];
+            
+            [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
         }
-        [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
     }
     
-    for (uint32_t segmentIndex = 0; segmentIndex < imageStarts->seg_count; segmentIndex++) {
-        uint32_t segmentInfoOffset = imageStarts->seg_info_offset[segmentIndex];
-        if (segmentInfoOffset == 0) {
-            continue;
-        }
-        const dyld_chained_starts_in_segment *segInfo = chainedFixups.startsForSegment(segmentIndex);
+    chainedFixups.forEachFixupChainSegment(imageStarts, ^(const dyld_chained_starts_in_segment *segInfo, uint32_t segIndex, bool &stop) {
         [self createChainedFixupsSegmentInfoNode:dataNode
-                                        location:location + segmentInfoOffset
+                                        location:location + imageStarts->seg_info_offset[segIndex]
                                           length:segInfo->size
-                                    segmentIndex:segmentIndex
+                                    segmentIndex:segIndex
                                    chainedFixups:chainedFixups];
-    }
+    });
     return dataNode;
 }
 
@@ -554,72 +537,90 @@ private:
     NSRange range = NSMakeRange(location,0);
     NSString * lastReadHex;
     MVNodeSaver nodeSaver;
-    MVNode * node = [parent insertChildWithDetails:[NSString stringWithFormat:@"Fixups Segment (%s)", segments_64[segmentIndex]->segname]
-                                          location:location length:length saver:nodeSaver];
+    MVNodeSaver opcodesSaver;
+    MVNodeSaver actionsSaver;
+//    MVNode *node = [parent insertChildWithDetails:[NSString stringWithFormat:@"Fixups Segment (%s)", segments_64[segmentIndex]->segname]
+//                                          location:location length:length saver:nodeSaver];
+    MVNode *dataNode = [self createDataNode:parent caption:[NSString stringWithFormat:@"Fixups Segment (%s)", segments_64[segmentIndex]->segname]
+                                   location:location length:length];
+    MVNode *opcodesNode = [dataNode insertChildWithDetails:@"Opcodes" location:location length:length saver:opcodesSaver];
+    MVNode *actionsNode = [dataNode insertChildWithDetails:@"Actions" location:location length:length saver:actionsSaver];
+    
+    [opcodesNode.details appendRow:@"" :@"" :@"Opcodes" :@"init"];
+    [actionsNode.details appendRow:@"" :@"" :@"Actions" :@"init"];
+    
     {
         [dataController read_uint32:range lastReadHex:&lastReadHex];
-        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+        [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                :lastReadHex
                                :@"Size"
                                :[NSString stringWithFormat:@"%d", segStarts->size]];
         
-        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [opcodesNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
         [dataController read_uint16:range lastReadHex:&lastReadHex];
-        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+        [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                :lastReadHex
                                :@"Page Size"
                                :[NSString stringWithFormat:@"%d", segStarts->page_size]];
         
-        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [opcodesNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
         [dataController read_uint16:range lastReadHex:&lastReadHex];
-        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+        [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                :lastReadHex
                                :@"Pointer Format"
                                :[NSString stringWithFormat:@"%d (%s)", segStarts->pointer_format,
                                              ChainedFixups::pointerFormatName(segStarts->pointer_format)]];
         
-        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [opcodesNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
         [dataController read_uint64:range lastReadHex:&lastReadHex];
-        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+        [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                :lastReadHex
                                :@"Segment Offset"
                                :[NSString stringWithFormat:@"%lld (%s)", segStarts->segment_offset, segments_64[segmentIndex]->segname]];
         
-        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [opcodesNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
         [dataController read_uint32:range lastReadHex:&lastReadHex];
-        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+        [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                :lastReadHex
                                :@"Max Valid Pointer"
                                :[NSString stringWithFormat:@"%d", segStarts->max_valid_pointer]];
         
-        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [opcodesNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
         [dataController read_uint16:range lastReadHex:&lastReadHex];
-        [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+        [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
                                :lastReadHex
                                :@"Page Count"
                                :[NSString stringWithFormat:@"%d", segStarts->page_count]];
-        [node.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
-        [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+        [opcodesNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        [opcodesNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
         
-        for (uint32_t pageIndex = 0; pageIndex < segStarts->page_count; pageIndex++) {
-            uint16_t offsetInPage = [dataController read_uint16:range lastReadHex:&lastReadHex];
-            [node.details appendRow:[NSString stringWithFormat:@"#%d", pageIndex] :nil :@"Page Index" :nil];
-            [node.details setAttributes:MVCellColorAttributeName, [NSColor greenColor], nil];
-            [node.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
-                                   :lastReadHex
-                                   :@"Offset In Page"
-                                   :[NSString stringWithFormat:@"%d", offsetInPage]];
-            [node.details appendRow:nil :nil
-                                   :@"Chain Ptr Type"
-                                   :[NSString stringWithFormat:@"%s", ChainedFixups::chainedPtrStartName(offsetInPage)]];
-            [node.details appendRow:nil :nil :@"Page Address" :[NSString stringWithFormat:@"0x%llx", segStarts->segment_offset + pageIndex * segStarts->page_size]];
-            [node.details appendRow:@"" :@"" :@"Fixups Chain Starts" :
-            [NSString stringWithFormat:@"0x%llx + $%d", segStarts->segment_offset + (pageIndex * segStarts->page_size) + offsetInPage, offsetInPage]];
-            [node.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
-        }
+        chainedFixups.forEachFixupInSegmentChains(segStarts, false, (uint8_t *)segments_64[segmentIndex]->fileoff,
+                                                  ^(uint32_t pageIndex, uint16_t offsetInPage, ChainedFixupPointerOnDisk *fixupLocation, bool &stop) {
+            
+        });
+        
+        
+//        for (uint32_t pageIndex = 0; pageIndex < segStarts->page_count; pageIndex++) {
+//            uint16_t offsetInPage = [dataController read_uint16:range lastReadHex:&lastReadHex];
+//            [opcodesNode.details appendRow:[NSString stringWithFormat:@"#%d", pageIndex] :nil :@"Page Index" :nil];
+//            [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+//                                   :lastReadHex
+//                                   :@"Offset In Page"
+//                                   :[NSString stringWithFormat:@"%d", offsetInPage]];
+//            [opcodesNode.details appendRow:nil :nil
+//                                   :@"Chain Ptr Type"
+//                                   :[NSString stringWithFormat:@"%s", ChainedFixups::chainedPtrStartName(offsetInPage)]];
+//            [opcodesNode.details appendRow:nil :nil :@"Page Address" :[NSString stringWithFormat:@"0x%llx", segStarts->segment_offset + pageIndex * segStarts->page_size]];
+//            [opcodesNode.details appendRow:@"" :@"" :@"Fixups Chain Starts" :
+//             [NSString stringWithFormat:@"0x%llx + $%d", segStarts->segment_offset + (pageIndex * segStarts->page_size) + offsetInPage, offsetInPage]];
+//            
+//            [opcodesNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+//        }
     }
-    return node;
+    return dataNode;
 }
+
+
 
 - (MVNode *) insertChainedFixupsChainStartsNode:(MVNode *)parent
                                        location:(uint64_t)location
@@ -628,7 +629,6 @@ private:
                                       pageIndex:(uint32_t)pageIndex
                                   chainedFixups:(ChainedFixups &)chainedFixups
 {
-    
     
     
     return nil;
