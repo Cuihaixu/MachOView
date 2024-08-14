@@ -7,16 +7,16 @@
       <BreakpointProxy
          BreakpointExtensionID = "Xcode.Breakpoint.FileBreakpoint">
          <BreakpointContent
-            uuid = "35771700-4E6C-4C48-A1D2-81A33D784306"
-            shouldBeEnabled = "Yes"
+            uuid = "9B5B07D5-2393-4FB8-80EC-22D8660E84AB"
+            shouldBeEnabled = "No"
             ignoreCount = "0"
             continueAfterRunningActions = "No"
-            filePath = "MachOLayout.mm"
+            filePath = "ChainedFixups.mm"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "1039"
-            endingLineNumber = "1039"
-            landmarkName = "-processDyldInfo"
+            startingLineNumber = "605"
+            endingLineNumber = "605"
+            landmarkName = "-createChainedFixupsSegmentInfoNode:location:length:segmentIndex:chainedFixups:"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

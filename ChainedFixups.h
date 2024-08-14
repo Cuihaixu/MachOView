@@ -18,6 +18,20 @@ NS_ASSUME_NONNULL_BEGIN
 - (MVNode *) createChainedFixupsParseNode:(MVNode *)parent
                                  location:(uint64_t)location
                                    length:(uint64_t)length;
+
+
+- (MVNode *) createChainedFixupsHeaderNode:(MVNode *)parent
+                                  location:(uint64_t)location
+                                    length:(uint64_t)length;
+
+- (MVNode *) createChainedFixupsImportsNode:(MVNode *)parent
+                                   location:(uint64_t)location
+                                     length:(uint64_t)length;
+
+- (MVNode *) createChainedFixupsSymbolsPoolNode:(MVNode *)parent
+                                       location:(uint64_t)location
+                                         length:(uint64_t)length;
+
 @end
 
 NS_ASSUME_NONNULL_END
