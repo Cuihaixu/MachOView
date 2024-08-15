@@ -601,7 +601,7 @@ private:
         [opcodesNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
         [opcodesNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
         
-        if ([self isSupportePointerFormat:segInfo->pointer_format]) {
+        if (![self isSupportePointerFormat:segInfo->pointer_format]) {
             [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", (unsigned long)0]
                                           :@""
                                           :@"Exception information"
@@ -620,7 +620,63 @@ private:
             } else {
                 uint64_t pageContentStart = segInfo->segment_offset + (pageIndex * segInfo->page_size);
                 pageContentStartInfo = [NSString stringWithFormat:@"0x%llx + $%d (0x%llx)", pageContentStart, offsetInPage, pageContentStart + offsetInPage];
-     
+                ChainedFixupPointerOnDisk *chain = (ChainedFixupPointerOnDisk *)[self imageAt:(pageContentStart + offsetInPage)];
+                [actionsNode.details appendRow:[NSString stringWithFormat:@"PAGE #%d", pageIndex] :@"" :@"" :@""];
+                [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor greenColor], nil];
+                [self forEachChain:chain pointerFormat:segInfo->pointer_format callback:^(ChainedFixupPointerOnDisk *fixupsLocation) {
+                    switch (segInfo->pointer_format) {
+                        case DYLD_CHAINED_PTR_ARM64E:
+                        {
+                            uint8_t actionType = fixupsLocation->raw64 & 0x3;
+                            switch (actionType) {
+                                case 0: // rebase
+                                {
+                                    
+                                }
+                                    break;
+                                case 1: // authRebase
+                                    break;
+                                case 2: // bind
+                                    break;
+                                case 3: // authBind
+                                    break;
+                                default:
+                                    break;
+                            }
+                            if (fixupsLocation->arm64e.authRebase.auth) {
+                                
+                            } else {
+                                
+                            }
+                        }
+                            break;
+                        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+                        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+                        {
+                            if (fixupsLocation->arm64e.authBind24.bind) {
+                                
+                            }
+                        }
+                            break;
+                        case DYLD_CHAINED_PTR_64:
+                        case DYLD_CHAINED_PTR_64_OFFSET:
+                        {
+                            if (fixupsLocation->generic64.rebase.bind) {
+                                [actionsNode.details appendRow:@"" :@"" :@"BIND" :[NSString stringWithFormat:@"%d", fixupsLocation->generic64.bind.ordinal]];
+                                [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor orangeColor], nil];
+                                [actionsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+                            } else {
+                                [actionsNode.details appendRow:@"" :@"" :@"REBASE" :[NSString stringWithFormat:@"0x%llx", fixupsLocation->generic64.rebase.target]];
+                                [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor yellowColor], nil];
+                                [actionsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+                            }
+                            
+                        }
+                            break;
+                        default:
+                            break;
+                    }
+                }];
             }
             [opcodesNode.details appendRow:[NSString stringWithFormat:@"#%d", pageIndex] :nil :@"Page Index" :nil];
             [opcodesNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
@@ -648,33 +704,47 @@ private:
 }
 
 - (void)forEachChain:(ChainedFixupPointerOnDisk *)chain pointerFormat:(uint32_t)pointerFormat callback:(void(^)(ChainedFixupPointerOnDisk *fixupsLocation))callback  {
-    callback(chain);
-    switch (pointerFormat) {
-        case DYLD_CHAINED_PTR_ARM64E:
-        case DYLD_CHAINED_PTR_ARM64E_USERLAND:
-        case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
-        {
-            
+    
+    bool  chainEnd = false;
+    while (!chainEnd) {
+        callback(chain);
+        switch (pointerFormat) {
+            case DYLD_CHAINED_PTR_ARM64E:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+            {
+                if (chain->arm64e.authRebase.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chain = (ChainedFixupPointerOnDisk *)((uint8_t *)chain + chain->arm64e.authRebase.next * 8);
+                }
+            }
+                break;
+            case DYLD_CHAINED_PTR_64:
+            case DYLD_CHAINED_PTR_64_OFFSET:
+            {
+                if (chain->generic64.rebase.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chain = (ChainedFixupPointerOnDisk *)((uint8_t *)chain +chain->generic64.rebase.next * 4);
+                }
+            }
+                break;
+                
+            case DYLD_CHAINED_PTR_32:
+            case DYLD_CHAINED_PTR_32_CACHE:
+            case DYLD_CHAINED_PTR_32_FIRMWARE:
+            case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+            case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+            case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+            case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+            default:
+                //TODO: Not supported
+                break;
         }
-            break;
-        case DYLD_CHAINED_PTR_64:
-        case DYLD_CHAINED_PTR_64_OFFSET:
-        {
-            
-        }
-            break;
-            
-        case DYLD_CHAINED_PTR_32:
-        case DYLD_CHAINED_PTR_32_CACHE:
-        case DYLD_CHAINED_PTR_32_FIRMWARE:
-        case DYLD_CHAINED_PTR_ARM64E_KERNEL:
-        case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
-        case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
-        case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
-        default:
-            //TODO: Not supported
-            break;
     }
+    
+
     
     
 }
