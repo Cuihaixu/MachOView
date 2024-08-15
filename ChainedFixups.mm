@@ -149,6 +149,7 @@ public:
     {
         return _fixupsHeader;
     }
+    
     uint32_t getFixupsHeaderSize(void) const
     {
         return _fixupsHeader->starts_offset;
@@ -277,6 +278,73 @@ public:
         struct dyld_chained_import_addend64 *importsA64;
         const void *rawPointer;
     };
+    
+    union ImportUnion importAtIndex(uint32_t index) {
+        union ImportUnion target;
+        do {
+            if (index >= _fixupsHeader->imports_count) {
+                target.rawPointer = nullptr;
+                break;
+            }
+            
+            void *importPointer = getFixupsImports();
+            uint32_t importFormat = _fixupsHeader->imports_format;
+            switch (importFormat) {
+                case DYLD_CHAINED_IMPORT:
+                {
+                    dyld_chained_import *imports = (dyld_chained_import *)importPointer;
+                    target.imports = &imports[index];
+                }
+                    break;
+                case DYLD_CHAINED_IMPORT_ADDEND:
+                {
+                    dyld_chained_import_addend *imports = (dyld_chained_import_addend *)importPointer;
+                    target.importsA32 = &imports[index];
+                }
+                    break;
+                case DYLD_CHAINED_IMPORT_ADDEND64:
+                {
+                    dyld_chained_import_addend64 *imports = (dyld_chained_import_addend64 *)importPointer;
+                    target.importsA64 = &imports[index];
+                }
+                    break;
+                default:
+                    target.rawPointer = nullptr;
+                    break;
+            }
+        } while (false);
+        return target;
+    }
+    
+    struct ImportSymbolInfo
+    {
+        uint32_t libOrdinal;
+        uint32_t nameOffset;
+    };
+    
+    bool importSymbolAtIndex(ImportSymbolInfo &result, uint32_t index) {
+        union ImportUnion target = importAtIndex(index);
+        if (target.rawPointer == nullptr) {
+            return false;
+        }
+        switch (_fixupsHeader->imports_format) {
+            case DYLD_CHAINED_IMPORT:
+                result.libOrdinal = target.imports->lib_ordinal;
+                result.nameOffset = target.imports->name_offset;
+                break;
+            case DYLD_CHAINED_IMPORT_ADDEND:
+                result.libOrdinal = target.importsA32->lib_ordinal;
+                result.nameOffset = target.importsA32->name_offset;
+                break;
+            case DYLD_CHAINED_IMPORT_ADDEND64:
+                result.libOrdinal = target.importsA64->lib_ordinal;
+                result.nameOffset = target.importsA64->name_offset;
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
     
 private:
     const dyld_chained_fixups_header*          _fixupsHeader   = nullptr;
@@ -608,7 +676,8 @@ private:
                                           :[NSString stringWithFormat:@"Unsupported pointer format (%s)", chainedFixups.pointerFormatName(segInfo->pointer_format)]];
             [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor redColor], nil];
         }
-        
+
+        uint64_t segmentContent = segments_64[segmentIndex]->fileoff + imageOffset;
         
         for (uint32_t pageIndex = 0; pageIndex < segInfo->page_count; pageIndex++) {
             uint16_t offsetInPage = [dataController read_uint16:range lastReadHex:&lastReadHex];
@@ -618,11 +687,12 @@ private:
             } else if (offsetInPage & DYLD_CHAINED_PTR_START_MULTI) {
                 pageContentStartInfo = @"DYLD_CHAINED_PTR_START_MULTI (Not Supported)";
             } else {
-                uint64_t pageContentStart = segInfo->segment_offset + (pageIndex * segInfo->page_size);
+                uint64_t pageContentStart = segmentContent + (pageIndex * segInfo->page_size);
                 pageContentStartInfo = [NSString stringWithFormat:@"0x%llx + $%d (0x%llx)", pageContentStart, offsetInPage, pageContentStart + offsetInPage];
                 ChainedFixupPointerOnDisk *chain = (ChainedFixupPointerOnDisk *)[self imageAt:(pageContentStart + offsetInPage)];
-                [actionsNode.details appendRow:[NSString stringWithFormat:@"PAGE #%d", pageIndex] :@"" :@"" :@""];
+                [actionsNode.details appendRow:[NSString stringWithFormat:@"#%d", pageIndex] :@"" :@"PAGE Address" :[NSString stringWithFormat:@"0x%llX", pageContentStart]];
                 [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor greenColor], nil];
+                
                 [self forEachChain:chain pointerFormat:segInfo->pointer_format callback:^(ChainedFixupPointerOnDisk *fixupsLocation) {
                     switch (segInfo->pointer_format) {
                         case DYLD_CHAINED_PTR_ARM64E:
@@ -631,43 +701,405 @@ private:
                             switch (actionType) {
                                 case 0: // rebase
                                 {
+                                    dyld_chained_ptr_arm64e_rebase *rebase = &fixupsLocation->arm64e.rebase;
+                                    [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                                  :@""
+                                                                  :@"REBASE"
+                                                                  :@""];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :[NSString stringWithFormat:@"%.8llX", chainedFixups.toLocation(rebase)]
+                                                                  :@"target"
+                                                                  :[NSString stringWithFormat:@"0x%llx", rebase->target]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"high8"
+                                                                  :[NSString stringWithFormat:@"%d", rebase->high8]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"next"
+                                                                  :[NSString stringWithFormat:@"%d", rebase->next]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"bind"
+                                                                  :[NSString stringWithFormat:@"%s", rebase->bind ? "YES": "NO"]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"auth"
+                                                                  :[NSString stringWithFormat:@"%s", rebase->auth ? "YES": "NO"]];
                                     
                                 }
                                     break;
                                 case 1: // authRebase
+                                {
+                                    dyld_chained_ptr_arm64e_auth_rebase *rebase = &fixupsLocation->arm64e.authRebase;
+                                    [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                                  :@""
+                                                                  :@"REBASE (AUTH)"
+                                                                  :@""];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"target"
+                                                                  :[NSString stringWithFormat:@"%u", rebase->target]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"diversity"
+                                                                  :[NSString stringWithFormat:@"%d", rebase->diversity]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"addrDiv"
+                                                                  :[NSString stringWithFormat:@"%d", rebase->addrDiv]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"key"
+                                                                  :[NSString stringWithFormat:@"%d", rebase->key]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"next"
+                                                                  :[NSString stringWithFormat:@"%d", rebase->next]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"bind"
+                                                                  :[NSString stringWithFormat:@"%s", rebase->bind ? "YES": "NO"]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"auth"
+                                                                  :[NSString stringWithFormat:@"%s", rebase->auth ? "YES": "NO"]];
+                                }
                                     break;
                                 case 2: // bind
+                                {
+                                    dyld_chained_ptr_arm64e_bind *bind = &fixupsLocation->arm64e.bind;
+                                    [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                                  :@""
+                                                                  :@"BIND"
+                                                                  :@""];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Ordinal"
+                                                                  :[NSString stringWithFormat:@"%d", bind->ordinal]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Zero"
+                                                                  :[NSString stringWithFormat:@"%d", bind->zero]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Addend"
+                                                                  :[NSString stringWithFormat:@"%d", bind->addend]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Next"
+                                                                  :[NSString stringWithFormat:@"%d", bind->next]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Bind"
+                                                                  :[NSString stringWithFormat:@"%d", bind->bind]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Auth"
+                                                                  :[NSString stringWithFormat:@"%d", bind->auth]];
+                                }
                                     break;
                                 case 3: // authBind
+                                {
+                                    dyld_chained_ptr_arm64e_auth_bind *bind = &fixupsLocation->arm64e.authBind;
+                                    [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                                  :@""
+                                                                  :@"BIND (AUTH)"
+                                                                  :@""];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Ordinal"
+                                                                  :[NSString stringWithFormat:@"%d", bind->ordinal]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Zero"
+                                                                  :[NSString stringWithFormat:@"%d", bind->zero]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Diversity"
+                                                                  :[NSString stringWithFormat:@"%d", bind->diversity]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"AddrDiv"
+                                                                  :[NSString stringWithFormat:@"%d", bind->addrDiv]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Key"
+                                                                  :[NSString stringWithFormat:@"%d", bind->key]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Next"
+                                                                  :[NSString stringWithFormat:@"%d", bind->next]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Bind"
+                                                                  :[NSString stringWithFormat:@"%d", bind->bind]];
+                                    
+                                    [actionsNode.details appendRow:@""
+                                                                  :@""
+                                                                  :@"Auth"
+                                                                  :[NSString stringWithFormat:@"%d", bind->auth]];
+                                }
                                     break;
                                 default:
                                     break;
                             }
-                            if (fixupsLocation->arm64e.authRebase.auth) {
-                                
-                            } else {
-                                
-                            }
+                            [actionsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
                         }
                             break;
                         case DYLD_CHAINED_PTR_ARM64E_USERLAND:
                         case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
                         {
-                            if (fixupsLocation->arm64e.authBind24.bind) {
+                            if (fixupsLocation->arm64e.authBind24.auth) {
+                                dyld_chained_ptr_arm64e_auth_bind24 *bind = &fixupsLocation->arm64e.authBind24;
+                                [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", chainedFixups.toLocation(bind)]
+                                                              :[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                              :@"BIND (AUTH)"
+                                                              :[NSString stringWithFormat:@"%s", ChainedFixups::pointerFormatName(segInfo->pointer_format)]];
+                                ChainedFixups::ImportSymbolInfo symbolInfo;
+                                NSString *libraryValue = @"Unknown library";
+                                NSString *symbolValue = @"Unknown symbols";
                                 
+                                if (chainedFixups.importSymbolAtIndex(symbolInfo, bind->ordinal)) {
+                                    libraryValue = [self getImportDylibNameWithLibOrdinal:symbolInfo.libOrdinal];
+                                    symbolValue = [NSString stringWithFormat:@"%s", chainedFixups.getSymbolName(symbolInfo.nameOffset)];
+                                }
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Ordinal"
+                                                              :[NSString stringWithFormat:@"#%d", bind->ordinal]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Library"
+                                                              :[NSString stringWithFormat:@"[%@]", libraryValue]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Symbol"
+                                                              :symbolValue];
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Ordinal"
+                                                              :[NSString stringWithFormat:@"%d", bind->ordinal]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Zero"
+                                                              :[NSString stringWithFormat:@"%d", bind->zero]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Diversity"
+                                                              :[NSString stringWithFormat:@"%d", bind->diversity]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Addr Div"
+                                                              :[NSString stringWithFormat:@"%d", bind->addrDiv]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Key"
+                                                              :[NSString stringWithFormat:@"%d", bind->key]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Next"
+                                                              :[NSString stringWithFormat:@"%d", bind->next]];
+
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Bind"
+                                                              :[NSString stringWithFormat:@"%d", bind->bind]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Auth"
+                                                              :[NSString stringWithFormat:@"%d", bind->auth]];
+                                
+                            } else {
+                                dyld_chained_ptr_arm64e_bind24 *bind = &fixupsLocation->arm64e.bind24;
+                                [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", chainedFixups.toLocation(bind)]
+                                                              :[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                              :@"BIND"
+                                                              :[NSString stringWithFormat:@"%s", ChainedFixups::pointerFormatName(segInfo->pointer_format)]];
+                                
+                                ChainedFixups::ImportSymbolInfo symbolInfo; // 0x00FFFFFF
+                                NSString *libraryValue = @"Unknown library";
+                                NSString *symbolValue = @"Unknown symbols";
+                                
+                                if (chainedFixups.importSymbolAtIndex(symbolInfo, bind->ordinal)) {
+                                    libraryValue = [self getImportDylibNameWithLibOrdinal:symbolInfo.libOrdinal];
+                                    symbolValue = [NSString stringWithFormat:@"%s", chainedFixups.getSymbolName(symbolInfo.nameOffset)];
+                                }
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Ordinal"
+                                                              :[NSString stringWithFormat:@"#%d", bind->ordinal]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Library"
+                                                              :[NSString stringWithFormat:@"[%@]", libraryValue]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Symbol"
+                                                              :symbolValue];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Zero"
+                                                              :[NSString stringWithFormat:@"%d", bind->zero]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Addend"
+                                                              :[NSString stringWithFormat:@"%d", bind->addend]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Next"
+                                                              :[NSString stringWithFormat:@"%d", bind->next]];
+
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Bind"
+                                                              :[NSString stringWithFormat:@"%d", bind->bind]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Auth"
+                                                              :[NSString stringWithFormat:@"%d", bind->auth]];
                             }
+                            [actionsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
                         }
                             break;
                         case DYLD_CHAINED_PTR_64:
                         case DYLD_CHAINED_PTR_64_OFFSET:
                         {
+                            
                             if (fixupsLocation->generic64.rebase.bind) {
-                                [actionsNode.details appendRow:@"" :@"" :@"BIND" :[NSString stringWithFormat:@"%d", fixupsLocation->generic64.bind.ordinal]];
+                                dyld_chained_ptr_64_bind *bind = &fixupsLocation->generic64.bind;
+                                [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", chainedFixups.toLocation(bind)]
+                                                              :[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                              :@"BIND"
+                                                              :[NSString stringWithFormat:@"%s", ChainedFixups::pointerFormatName(segInfo->pointer_format)]];
                                 [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor orangeColor], nil];
+                                
+                                ChainedFixups::ImportSymbolInfo symbolInfo;
+                                NSString *libraryValue = @"Unknown library";
+                                NSString *symbolValue = @"Unknown symbols";
+                                
+                                if (chainedFixups.importSymbolAtIndex(symbolInfo, bind->ordinal)) {
+                                    libraryValue = [self getImportDylibNameWithLibOrdinal:symbolInfo.libOrdinal];
+                                    symbolValue = [NSString stringWithFormat:@"%s", chainedFixups.getSymbolName(symbolInfo.nameOffset)];
+                                }
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Ordinal"
+                                                              :[NSString stringWithFormat:@"#%d", bind->ordinal]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Library"
+                                                              :libraryValue];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Symbol"
+                                                              :symbolValue];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Addend"
+                                                              :[NSString stringWithFormat:@"%d", bind->addend]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Reserved"
+                                                              :[NSString stringWithFormat:@"%d", bind->reserved]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Next"
+                                                              :[NSString stringWithFormat:@"%d", bind->next]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Bind"
+                                                              :[NSString stringWithFormat:@"%d", bind->bind]];
+                                
                                 [actionsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
                             } else {
-                                [actionsNode.details appendRow:@"" :@"" :@"REBASE" :[NSString stringWithFormat:@"0x%llx", fixupsLocation->generic64.rebase.target]];
+                                dyld_chained_ptr_64_rebase *rebase = &fixupsLocation->generic64.rebase;
+                                uint64_t rebaseLocation = chainedFixups.toLocation(rebase);
+                                [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", chainedFixups.toLocation(rebase)]
+                                                              :[NSString stringWithFormat:@"%.8llX", fixupsLocation->raw64]
+                                                              :@"REBASE"
+                                                              :[NSString stringWithFormat:@"%s", ChainedFixups::pointerFormatName(segInfo->pointer_format)]];
                                 [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor yellowColor], nil];
+                                
+                                [actionsNode.details appendRow:@"" :@"" :@"BindTarget"
+                                                              :[NSString stringWithFormat:@"0x%llx (%@)",
+                                                                chainedFixups.toLocation(rebase),
+                                                                [self findSectionContainsRVA:[self fileOffsetToRVA:(rebaseLocation)]]]];
+                                
+//                                [self findSectionContainsRVA:[self fileOffsetToRVA:rebase->target + self->imageOffset]]
+
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Target"
+                                                              :[NSString stringWithFormat:@"0x%llx", rebase->target]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"High8"
+                                                              :[NSString stringWithFormat:@"%d", rebase->high8]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Reserved"
+                                                              :[NSString stringWithFormat:@"%d", rebase->reserved]];
+                                
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Next"
+                                                              :[NSString stringWithFormat:@"%d", rebase->next]];
+                    
+                                [actionsNode.details appendRow:@""
+                                                              :@""
+                                                              :@"Bind"
+                                                              :[NSString stringWithFormat:@"%d", rebase->bind]];
+                                
                                 [actionsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
                             }
                             
