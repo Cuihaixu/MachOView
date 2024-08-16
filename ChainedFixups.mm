@@ -14,6 +14,26 @@
 #import <mach-o/loader.h>
 #import <mach-o/nlist.h>
 
+//class HasValue {
+//    uint8_t hasValue;
+//};
+//
+//template <class T>
+//class FieldValue : HasValue {
+//
+//    void setValue(T value) {
+//        this->hasValue = true;
+//        _value = value;
+//    }
+//    T value(void) {
+//        return _value;
+//    }
+//private:
+//    T _value;
+//
+//};
+
+
 union ChainedFixupPointerOnDisk
 {
     union Arm64e {
@@ -23,6 +43,16 @@ union ChainedFixupPointerOnDisk
         dyld_chained_ptr_arm64e_bind        bind;
         dyld_chained_ptr_arm64e_bind24      bind24;
         dyld_chained_ptr_arm64e_auth_bind24 authBind24;
+        
+        const char* keyName(uint8_t keyBits)
+        {
+            static const char* const names[] = {
+                "IA", "IB", "DA", "DB"
+            };
+            assert(keyBits < 4);
+            return names[keyBits];
+        }
+        
     };
 
     union Generic64 {
@@ -33,6 +63,219 @@ union ChainedFixupPointerOnDisk
     uint64_t            raw64;
     Arm64e              arm64e;
     Generic64           generic64;
+    
+    union FixupValues {
+        uint16_t rawValue;
+        uint16_t target    : 1,
+                 high8     : 1,
+                 diversity : 1,
+                 addrDiv   : 1,
+                 key       : 1,
+                 next      : 1,
+                 bind      : 1,
+                 auth      : 1,
+                 ordinal   : 1,
+                 zero      : 1,
+                 addend    : 1,
+                 reserved  : 1;
+    };
+    
+    struct FixupInfo
+    {
+        union FixupValues hasValue;
+        uint64_t target;
+        uint64_t ordinal;
+        uint32_t addend;
+        uint32_t reserved;
+        uint32_t zero;
+        uint8_t  high8;
+        uint16_t diversity;
+        uint16_t next;
+        uint8_t  addrDiv : 1,
+                 key     : 2,
+                 bind    : 1,
+                 auth    : 1;
+        struct { bool hasValue; uint64_t value; } targetField;
+        
+    };
+    
+    template <class T>
+    class Field
+    {
+    public:
+        void setValue(T value) {
+            _hasValue = true;
+            _value = value;
+        }
+        
+        T value(void) {
+            return _value;
+        }
+        
+        bool hasValue(void) {
+            return _hasValue;
+        }
+    private:
+        bool _hasValue = false;
+        T    _value;
+    };
+    
+    struct FixupPointerInfo
+    {
+        Field<uint64_t> target;
+        Field<uint64_t> ordinal;
+        Field<uint32_t> addend;
+        Field<uint32_t> reserved;
+        Field<uint32_t> zero;
+        Field<uint8_t>  high8;
+        Field<uint16_t> diversity;
+        Field<uint16_t> next;
+        Field<uint8_t>  addrDiv;
+        Field<uint8_t> key;
+        Field<uint8_t> bind;
+        Field<uint8_t> auth;
+    };
+    
+    
+    
+    static bool parseFixupInfo(uint16_t pointerFormat, ChainedFixupPointerOnDisk *fixupLoc, FixupPointerInfo &result) {
+        switch (pointerFormat) {
+            /* arm64e */
+            case DYLD_CHAINED_PTR_ARM64E:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+            {
+                result.bind.setValue(fixupLoc->arm64e.authRebase.bind);
+                result.auth.setValue(fixupLoc->arm64e.authRebase.auth);
+                if ( fixupLoc->arm64e.authRebase.auth ) { // 是否是授权
+                    if (fixupLoc->arm64e.authBind.bind) { // 绑定
+                        if (pointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24) {
+                            result.ordinal.setValue(fixupLoc->arm64e.authBind24.ordinal);
+                            result.zero.setValue(fixupLoc->arm64e.authBind24.zero);
+                        } else {
+                            result.ordinal.setValue(fixupLoc->arm64e.authBind.ordinal);
+                            result.zero.setValue(fixupLoc->arm64e.authBind.zero);
+                        }
+                        result.diversity.setValue(fixupLoc->arm64e.authBind.diversity);
+                        result.addrDiv.setValue(fixupLoc->arm64e.authBind.addrDiv);
+                        result.key.setValue(fixupLoc->arm64e.authBind.key);
+                        result.next.setValue(fixupLoc->arm64e.authBind.next);
+                    } else { // 变基
+                        dyld_chained_ptr_arm64e_auth_rebase *rebase = &fixupLoc->arm64e.authRebase;
+                        result.target.setValue(rebase->target);
+                        result.diversity.setValue(rebase->diversity);
+                        result.addrDiv.setValue(rebase->addrDiv);
+                        result.key.setValue(rebase->key);
+                        result.next.setValue(rebase->next);
+                    }
+                 }
+                 else { // 非授权
+                     if (fixupLoc->arm64e.bind.bind) { // 绑定
+                         if (pointerFormat == DYLD_CHAINED_PTR_ARM64E_USERLAND24) {
+                             result.target.setValue(fixupLoc->arm64e.bind24.ordinal);
+                             result.zero.setValue(fixupLoc->arm64e.bind24.zero);
+                         } else {
+                             result.target.setValue(fixupLoc->arm64e.bind.ordinal);
+                             result.zero.setValue(fixupLoc->arm64e.bind.zero);
+                         }
+                         result.addend.setValue(fixupLoc->arm64e.bind.addend);
+                         result.next.setValue(fixupLoc->arm64e.bind.next);
+                     } else { // 变基
+                         result.target.setValue(fixupLoc->arm64e.rebase.target);
+                         result.high8.setValue(fixupLoc->arm64e.rebase.high8);
+                         result.next.setValue(fixupLoc->arm64e.rebase.next);
+                     }
+                 }
+            }
+                break;
+                
+            /* arm64 */
+            case DYLD_CHAINED_PTR_64:
+            case DYLD_CHAINED_PTR_64_OFFSET:
+            {
+                result.next.setValue(fixupLoc->generic64.bind.next);
+                result.bind.setValue(fixupLoc->generic64.bind.bind);
+                if (fixupLoc->generic64.bind.bind) {
+                    result.ordinal.setValue(fixupLoc->generic64.bind.ordinal);
+                    result.addend.setValue(fixupLoc->generic64.bind.addend);
+                    result.reserved.setValue(fixupLoc->generic64.bind.reserved);
+                } else {
+                    result.target.setValue(fixupLoc->generic64.rebase.target);
+                    result.high8.setValue(fixupLoc->generic64.rebase.high8);
+                    result.reserved.setValue(fixupLoc->generic64.rebase.reserved);
+                }
+            }
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+};
+
+/**
+ [文件地址/虚拟地址]:[数据内容]:[数据描述]:[内容解析]
+ 
+ */
+
+struct ChainedFixupsHeader : dyld_chained_fixups_header
+{
+    struct ImportInfo
+    {
+        uint64_t    libOrdinal : 16,
+                    weakImport :  1,
+                    reserved   : 15,
+                    nameOffset : 32;
+        uint64_t    addend;
+    };
+    
+    bool importAtIndex(uint64_t index, ImportInfo &result) {
+        if (index >= this->imports_count) {
+            return false;
+        }
+        uint64_t importsAddress = ((uintptr_t)this + this->imports_offset);
+        
+        switch (this->imports_format) {
+            case DYLD_CHAINED_IMPORT:
+            {
+                dyld_chained_import *imports = &((dyld_chained_import *)importsAddress)[index];
+                result.libOrdinal = imports->lib_ordinal;
+                result.weakImport = imports->weak_import;
+                result.nameOffset = imports->name_offset;
+                result.addend = 0;
+            }
+                
+                break;
+            case DYLD_CHAINED_IMPORT_ADDEND:
+            {
+                const dyld_chained_import_addend *importsA32 = &((dyld_chained_import_addend *)importsAddress)[index];
+                result.libOrdinal = importsA32->lib_ordinal;
+                result.weakImport = importsA32->weak_import;
+                result.nameOffset = importsA32->name_offset;
+                result.addend = importsA32->addend;
+            }
+                break;
+            case DYLD_CHAINED_IMPORT_ADDEND64:
+            {
+                const dyld_chained_import_addend64 *importsA64 = &((dyld_chained_import_addend64 *)importsAddress)[index];
+                result.libOrdinal = importsA64->lib_ordinal;
+                result.weakImport = importsA64->weak_import;
+                result.nameOffset = importsA64->name_offset;
+                result.addend = importsA64->addend;
+                
+            }
+                break;
+            default:
+                return false;
+        }
+        return true;
+    }
+    
+    const char *getImportSymbol(uint64_t nameOffset) {
+        const char *symbolsPool = (const char *)((uintptr_t)this + this->symbols_offset);
+        return &symbolsPool[nameOffset];
+    }
+    
 };
 
 struct ChainedFixups
@@ -357,6 +600,10 @@ private:
   struct obj const * var = (struct obj *)[self imageAt:(location)]; \
   if (!var) [NSException raise:@"null exception" format:@#var " is null"];
 
+#define MATCH_UNION_FORM_IMAGE(obj, var, location) \
+  union obj const * var = (union obj *)[self imageAt:(location)]; \
+  if (!var) [NSException raise:@"null exception" format:@#var " is null"];
+
 @implementation MachOLayout (ChainedFixups)
 
 - (unsigned)fixupsChainStrideSize:(uint16_t)pointerFormat
@@ -418,6 +665,7 @@ private:
     }
 }
 
+#pragma mark - MAIN 节点
 - (MVNode *) createChainedFixupsParseNode:(MVNode *)parent
                                  location:(uint64_t)location
                                    length:(uint64_t)length {
@@ -429,10 +677,15 @@ private:
                                  length:chainedFixups.getFixupsHeaderSize()
                           chainedFixups:chainedFixups];
     
-    [self createChainedFixupsImageStartsNode:parent
-                                    location:location + fixupsHeader->starts_offset
-                                      length:chainedFixups.getImageStartsSize()
-                               chainedFixups:chainedFixups];
+//    [self createChainedFixupsImageStartsNode:parent
+//                                    location:location + fixupsHeader->starts_offset
+//                                      length:chainedFixups.getImageStartsSize()
+//                               chainedFixups:chainedFixups];
+    
+    [self createChainedStartsNode:parent
+                         location:location + fixupsHeader->starts_offset
+                           length:fixupsHeader->imports_offset - fixupsHeader->starts_offset
+                     fixupsHeader:fixupsHeader];
     
     [self createChainedFixupsImportsNode:parent
                                 location:location + fixupsHeader->imports_offset
@@ -447,6 +700,7 @@ private:
     return NULL;
 }
 
+#pragma mark -  1. 创建头节点
 - (MVNode *) createChainedFixupsHeaderNode:(MVNode *)parent
                                   location:(uint64_t)location
                                     length:(uint64_t)length
@@ -528,6 +782,233 @@ private:
     return node;
 }
 
+#pragma mark - 2. 创建开始点节点
+- (MVNode *) createChainedStartsNode:(MVNode *)parent
+                            location:(uint64_t)location
+                              length:(uint64_t)length
+                        fixupsHeader:(const dyld_chained_fixups_header *)fixupsHeader
+{
+    MATCH_STRUCT_FORM_IMAGE(dyld_chained_starts_in_image, imageStarts, location);
+    ChainedFixupsHeader *header = (ChainedFixupsHeader *)fixupsHeader;
+    NSRange range = NSMakeRange(location,0);
+    NSString * lastReadHex;
+    MVNodeSaver nodeSaver;
+    MVNodeSaver fixupChainsSaver;
+    MVNodeSaver actionsNodeSaver;
+    MVNode *fixupChainsNode = [self createDataNode:parent caption:@"Fixup Starts" location:location length:length];
+    MVNode *startsNode = [fixupChainsNode insertChildWithDetails:@"Chain Starts" location:location length:length saver:nodeSaver];
+    MVNode *actionsNode = [fixupChainsNode insertChildWithDetails:@"Chain Actinos" location:location length:length saver:actionsNodeSaver];
+    
+    {
+        [startsNode.details appendRow:@"" :@"" :@"IMAGE STARTS" :@""];
+        [startsNode.details setAttributes:MVCellColorAttributeName, [NSColor greenColor], nil];
+        
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                     :lastReadHex
+                                     :@"Segment Count"
+                                     :[NSString stringWithFormat:@"%d", imageStarts->seg_count]];
+        for (uint32_t segIdx = 0; segIdx < imageStarts->seg_count; segIdx++) {
+            [startsNode.details appendRow:[NSString stringWithFormat:@"#%d",segIdx]
+                                         :@""
+                                         :@"Segment"
+                                         :[NSString stringWithFormat:@"%s", segments_64[segIdx]->segname]];
+            [dataController read_uint32:range lastReadHex:&lastReadHex];
+            [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                         :lastReadHex
+                                         :[NSString stringWithFormat:@"Starts Offset"]
+                                         :[NSString stringWithFormat:@"%d", imageStarts->seg_info_offset[segIdx]]];
+        }
+        [startsNode.details setAttributes:MVUnderlineAttributeName, @"YES", nil];
+    }
+    
+    for (uint32_t segIdx = 0; segIdx < imageStarts->seg_count; segIdx++) {
+        uint64_t segmentContent = segments_64[segIdx]->fileoff + imageOffset;
+        uint32_t segmentInfoOffset = imageStarts->seg_info_offset[segIdx];
+        if (segmentInfoOffset == 0) {
+            continue;
+        }
+
+        [startsNode.details appendRow:@"" :@"" :[NSString stringWithFormat:@"SEGMENT STARTS (%d)", segIdx]
+                                     :[NSString stringWithFormat:@"%s", segments_64[segIdx]->segname]];
+        [startsNode.details setAttributes:MVCellColorAttributeName, [NSColor purpleColor], nil];
+        MATCH_STRUCT_FORM_IMAGE(dyld_chained_starts_in_segment, segInfo, location + segmentInfoOffset);
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Size"
+                               :[NSString stringWithFormat:@"%d", segInfo->size]];
+        
+        [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Page Size"
+                               :[NSString stringWithFormat:@"%d", segInfo->page_size]];
+        
+        [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Pointer Format"
+                               :[NSString stringWithFormat:@"%d (%s)", segInfo->pointer_format,
+                                             ChainedFixups::pointerFormatName(segInfo->pointer_format)]];
+        
+        [dataController read_uint64:range lastReadHex:&lastReadHex];
+        [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Segment Offset"
+                               :[NSString stringWithFormat:@"%lld (%s)", segInfo->segment_offset, segments_64[segIdx]->segname]];
+        
+        [dataController read_uint32:range lastReadHex:&lastReadHex];
+        [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Max Valid Pointer"
+                               :[NSString stringWithFormat:@"%d", segInfo->max_valid_pointer]];
+        
+        [dataController read_uint16:range lastReadHex:&lastReadHex];
+        [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                               :lastReadHex
+                               :@"Page Count"
+                               :[NSString stringWithFormat:@"%d", segInfo->page_count]];
+        
+        for (uint16_t pageIndex = 0; pageIndex < segInfo->page_count; pageIndex++) {
+            uint16_t offsetInPage = segInfo->page_start[pageIndex];
+            
+            [dataController read_uint16:range lastReadHex:&lastReadHex];
+            [startsNode.details appendRow:[NSString stringWithFormat:@"%.8lX", range.location]
+                                         :lastReadHex
+                                         :[NSString stringWithFormat:@"Page Starts (%d)", pageIndex]
+                                         :[NSString stringWithFormat:@"%d (0x%llx)", offsetInPage, segmentContent + offsetInPage]];
+            if (offsetInPage == DYLD_CHAINED_PTR_START_NONE) {
+                continue;
+            }
+            uint64_t pageContentStart = (segmentContent + (pageIndex * segInfo->page_size) + offsetInPage);
+            MATCH_UNION_FORM_IMAGE(ChainedFixupPointerOnDisk, chain, pageContentStart);
+            [self forEachChainStarts:(ChainedFixupPointerOnDisk *)chain pointerFormat:segInfo->pointer_format callback:^(ChainedFixupPointerOnDisk *fixupsLoc, bool &stop) {
+                
+                ChainedFixupPointerOnDisk::FixupPointerInfo fixupInfo;
+                if (ChainedFixupPointerOnDisk::parseFixupInfo(segInfo->pointer_format, fixupsLoc, fixupInfo)) {
+                
+                    NSAssert(fixupInfo.bind.hasValue()  && fixupInfo.next.hasValue(), @"Necessary parameters are missing");
+                    
+                    NSString *actionType = fixupInfo.bind.value() ? @"BIND" : @"REBASE";
+                    if (fixupInfo.auth.hasValue() && fixupInfo.auth.value()) {
+                        actionType = [actionType stringByAppendingString:@" (ATUH)"];
+                    }
+                    
+                    [actionsNode.details appendRow:[NSString stringWithFormat:@"%.8llX", pageContentStart + ((uint64_t)fixupsLoc - (uint64_t)chain)]
+                                                  :[NSString stringWithFormat:@"%llX", fixupsLoc->raw64]
+                                                  :actionType
+                                                  :[self findSectionContainsRVA:[self fileOffsetToRVA:pageContentStart + ((uint64_t)fixupsLoc - (uint64_t)chain)]]];
+                    if (fixupInfo.target.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Target"
+                                                      :[NSString stringWithFormat:@"0x%llx", fixupInfo.target.value()]];
+                    }
+                    
+                    if (fixupInfo.zero.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Zero"
+                                                      :[NSString stringWithFormat:@"0x%x", fixupInfo.zero.value()]];
+                    }
+                    
+                    if (fixupInfo.ordinal.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Import Table Ordinal"
+                                                      :[NSString stringWithFormat:@"#%lld", fixupInfo.ordinal.value()]];
+                        ChainedFixupsHeader::ImportInfo importInfo;
+                        if (((ChainedFixupsHeader *)fixupsHeader)->importAtIndex(fixupInfo.ordinal.value(), importInfo)) {
+                            [actionsNode.details appendRow:@""
+                                                          :@""
+                                                          :@"Dylib"
+                                                          :[NSString stringWithFormat:@"[%@]", [self getImportDylibNameWithLibOrdinal:importInfo.libOrdinal]]];
+                            [actionsNode.details appendRow:@""
+                                                          :@""
+                                                          :@"Symbol"
+                                                          :[NSString stringWithFormat:@"%s", header->getImportSymbol(importInfo.nameOffset)]];
+                            
+                        } else {
+                            [actionsNode.details appendRow:@""
+                                                          :@""
+                                                          :@"Error"
+                                                          :@"Get import info error"];
+                        }
+                    
+                        
+
+                    }
+                    
+                    if (fixupInfo.high8.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"High8"
+                                                      :[NSString stringWithFormat:@"%d", fixupInfo.high8.value()]];
+                    }
+                    
+                    if (fixupInfo.diversity.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Diversity"
+                                                      :[NSString stringWithFormat:@"%d", fixupInfo.diversity.value()]];
+                    }
+                    
+                    if (fixupInfo.addrDiv.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"AddrDiv"
+                                                      :[NSString stringWithFormat:@"%d", fixupInfo.addrDiv.value()]];
+                    }
+                    
+                    if (fixupInfo.key.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Key"
+                                                      :[NSString stringWithFormat:@"%d (%s)", fixupInfo.key.value(), fixupsLoc->arm64e.keyName(fixupInfo.key.value())]];
+                    }
+                    
+                    if (fixupInfo.next.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Next"
+                                                      :[NSString stringWithFormat:@"%d", fixupInfo.next.value()]];
+                    }
+                    
+                    if (fixupInfo.bind.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Bind"
+                                                      :[NSString stringWithFormat:@"%d", fixupInfo.bind.value()]];
+                    }
+                    
+                    if (fixupInfo.auth.hasValue()) {
+                        [actionsNode.details appendRow:@""
+                                                      :@""
+                                                      :@"Auth"
+                                                      :[NSString stringWithFormat:@"%d", fixupInfo.auth.value()]];
+                    }
+                    
+                    [actionsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+                    
+                } else {
+                    stop = true;
+                    [actionsNode.details appendRow:@"" :@""
+                                                    :@"Exception" :@"Parsing the repair chain failed ."];
+                    [actionsNode.details setAttributes:MVCellColorAttributeName, [NSColor redColor], nil];
+                }
+                
+            }];
+
+        }
+      
+        [startsNode.details setAttributes:MVUnderlineAttributeName,@"YES",nil];
+    }
+    return nil;
+}
+
+
+
 #pragma mark - 1. 创建 Image Stars 节点 - dyld_chained_starts_in_image (镜像中有几个段需要修复)
 - (MVNode *) createChainedFixupsImageStartsNode:(MVNode *)parent
                                        location:(uint64_t)location
@@ -584,28 +1065,6 @@ private:
 }
 
 #pragma mark - 2. 创建 Segment Starts - dyld_chained_starts_in_segment (每个段中有多少页需要修复)
-
-/**
- - Image Fixups Chains
-    - Segment Fixups Chains
-        - In Page Fixups Chains
-            - chiled Fixups Starts
-        - fixups Actions
-    
-- Fixups Actions
-    - page Info
-        - 所在段、节
-        - page 索引
-        - chain starts index (节点)
-    - location:
-    - REBASE
-        
-    - BIND
-        - lib name
-        - symbol name
-        - import symbol index
-        
- */
 
 - (MVNode *) createChainedFixupsSegmentInfoNode:(MVNode *)parent
                                        location:(uint64_t)location
@@ -1134,6 +1593,51 @@ private:
             return NO;
     }
 }
+
+//  bool stopped = false;
+- (void)forEachChainStarts:(ChainedFixupPointerOnDisk *)chain pointerFormat:(uint32_t)pointerFormat callback:(void(^)(ChainedFixupPointerOnDisk *fixupsLoc, bool &stop))callback {
+    bool stoped = false;
+    bool chainEnd = false;
+    while (!chainEnd) {
+        callback(chain, stoped);
+        if (stoped) break;
+        switch (pointerFormat) {
+            case DYLD_CHAINED_PTR_ARM64E:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+            case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+            {
+                if (chain->arm64e.authRebase.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chain = (ChainedFixupPointerOnDisk *)((uint8_t *)chain + chain->arm64e.authRebase.next * 8);
+                }
+            }
+                break;
+            case DYLD_CHAINED_PTR_64:
+            case DYLD_CHAINED_PTR_64_OFFSET:
+            {
+                if (chain->generic64.rebase.next == 0) {
+                    chainEnd = true;
+                } else {
+                    chain = (ChainedFixupPointerOnDisk *)((uint8_t *)chain +chain->generic64.rebase.next * 4);
+                }
+            }
+                break;
+                
+            case DYLD_CHAINED_PTR_32:
+            case DYLD_CHAINED_PTR_32_CACHE:
+            case DYLD_CHAINED_PTR_32_FIRMWARE:
+            case DYLD_CHAINED_PTR_ARM64E_KERNEL:
+            case DYLD_CHAINED_PTR_ARM64E_FIRMWARE:
+            case DYLD_CHAINED_PTR_64_KERNEL_CACHE:
+            case DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE:
+            default:
+                //TODO: Not supported
+                break;
+        }
+    }
+}
+
 
 - (void)forEachChain:(ChainedFixupPointerOnDisk *)chain pointerFormat:(uint32_t)pointerFormat callback:(void(^)(ChainedFixupPointerOnDisk *fixupsLocation))callback  {
     
